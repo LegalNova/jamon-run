@@ -81,7 +81,7 @@ export interface SnapshotNet {
   /** Tiempo restante y de partida en décimas. */
   tl: number;
   mt: number;
-  /** Personajes: [id, x*10, y*10, vx, vy, fx*100, fy*100, hp, energía, flags]. */
+  /** Personajes: [id, x*10, y*10, vx, vy, fx*100, fy*100, hp, energía, flags, atrapado*10, rescate*100]. */
   c: number[][];
   /** Objetos: [iid, tipo, x, y, vida]. */
   p: number[][];
@@ -89,6 +89,8 @@ export interface SnapshotNet {
   j: number[][];
   /** Humo: [sid, x, y, vida*10]. */
   k: number[][];
+  /** Viento (levante) en décimas de px/s. */
+  w: [number, number];
   e: SimEvent[];
 }
 
@@ -109,7 +111,7 @@ export type ClientMsg =
 // ------------------------------------------------------------------ codificación
 
 export const STATES: MatchState[] = ['countdown', 'play', 'ended'];
-export const PICKUPS: PickupType[] = ['medkit', 'boot', 'shield'];
+export const PICKUPS: PickupType[] = ['medkit', 'boot', 'shield', 'gold'];
 
 export const F = {
   alive: 1,
@@ -122,6 +124,7 @@ export const F = {
   stun: 128,
   hamHidden: 256,
   human: 512,
+  trapped: 1024,
 } as const;
 
 export function encodeChar(c: SimChar): number[] {
@@ -136,7 +139,21 @@ export function encodeChar(c: SimChar): number[] {
   if (c.stun > 0) f |= F.stun;
   if (c.hamHidden > 0) f |= F.hamHidden;
   if (c.human) f |= F.human;
-  return [c.id, Math.round(c.x * 10), Math.round(c.y * 10), Math.round(c.vx + c.kbx), Math.round(c.vy + c.kby), Math.round(c.fx * 100), Math.round(c.fy * 100), Math.round(c.hp), Math.round(c.energy), f];
+  if (c.trapped > 0) f |= F.trapped;
+  return [
+    c.id,
+    Math.round(c.x * 10),
+    Math.round(c.y * 10),
+    Math.round(c.vx + c.kbx),
+    Math.round(c.vy + c.kby),
+    Math.round(c.fx * 100),
+    Math.round(c.fy * 100),
+    Math.round(c.hp),
+    Math.round(c.energy),
+    f,
+    Math.round(Math.max(0, c.trapped) * 10),
+    Math.round(c.rescueProg * 100),
+  ];
 }
 
 /** Redondea los números de un evento para que ocupe menos. */

@@ -4,6 +4,7 @@ import { BiomeId } from '../world/maps';
 import { Grid } from '../world/grid';
 import { PAL } from './palette';
 import { gridTexture, makeCanvas, PixelGrid, rng } from './pixel';
+import { buildCityProps, CITY_BIOMES, drawCityTile } from './cityTiles';
 
 // ------------------------------------------------------------------ utilidades de color
 
@@ -18,7 +19,7 @@ function rgb(hex: string): [number, number, number] {
   return c;
 }
 
-class Raster {
+export class Raster {
   constructor(readonly img: ImageData) {}
   set(x: number, y: number, hex: string): void {
     if (x < 0 || y < 0 || x >= this.img.width || y >= this.img.height) return;
@@ -32,7 +33,7 @@ class Raster {
   }
 }
 
-interface Biome {
+export interface Biome {
   base: string;
   dark: string;
   light: string;
@@ -78,11 +79,12 @@ const BIOMES: Record<BiomeId, Biome> = {
     rockFace: '#6f7f9e',
     rockDark: '#4a5776',
   },
+  ...CITY_BIOMES,
 };
 
 // ------------------------------------------------------------------ dibujo de tiles
 
-type TileCtx = {
+export type TileCtx = {
   r: Raster;
   grid: Grid;
   biome: Biome;
@@ -95,9 +97,9 @@ type TileCtx = {
   phase: number;
 };
 
-const isCh = (grid: Grid, tx: number, ty: number, chars: string): boolean => chars.includes(grid.charAt(tx, ty));
+export const isCh = (grid: Grid, tx: number, ty: number, chars: string): boolean => chars.includes(grid.charAt(tx, ty));
 
-function drawGround(t: TileCtx): void {
+export function drawGround(t: TileCtx): void {
   const { r, biome, ox, oy, rand } = t;
   for (let y = 0; y < TILE; y++) {
     for (let x = 0; x < TILE; x++) {
@@ -215,7 +217,7 @@ function drawRuin(t: TileCtx): void {
   }
 }
 
-function drawSmallRock(t: TileCtx): void {
+export function drawSmallRock(t: TileCtx): void {
   drawGround(t);
   const { r, ox, oy, id } = t;
   const g = new PixelGrid(16, 16);
@@ -252,7 +254,7 @@ function drawSnowPile(t: TileCtx): void {
   }
 }
 
-function drawWater(t: TileCtx): void {
+export function drawWater(t: TileCtx): void {
   const { r, ox, oy, grid, tx, ty, phase } = t;
   const wet = (x: number, y: number) => isCh(grid, x, y, '~=');
   for (let y = 0; y < TILE; y++) {
@@ -285,7 +287,7 @@ function drawWater(t: TileCtx): void {
   if (!wet(tx, ty + 1)) for (let x = 0; x < TILE; x++) r.set(ox + x, oy + TILE - 1, '#bfe9ff');
 }
 
-function drawBridge(t: TileCtx): void {
+export function drawBridge(t: TileCtx): void {
   const { r, ox, oy, grid, tx, ty } = t;
   const above = isCh(grid, tx, ty - 1, '=');
   const below = isCh(grid, tx, ty + 1, '=');
@@ -381,7 +383,7 @@ function drawDeepSnow(t: TileCtx): void {
   }
 }
 
-function drawTreeBase(t: TileCtx): void {
+export function drawTreeBase(t: TileCtx): void {
   drawGround(t);
   const { r, ox, oy } = t;
   const shadow = t.id === 'snow' ? '#c5d3ea' : t.id === 'desert' ? '#c49a5a' : '#3a7a36';
@@ -393,6 +395,7 @@ function drawTreeBase(t: TileCtx): void {
 }
 
 function drawTile(t: TileCtx): void {
+  if (drawCityTile(t, drawWater, drawSmallRock)) return;
   const c = t.grid.charAt(t.tx, t.ty);
   switch (c) {
     case '#':
@@ -657,6 +660,7 @@ export function buildPropTextures(scene: Phaser.Scene): void {
   buildCactus(scene, 'cactus1', true);
   buildPine(scene, 'pine0', 5);
   buildPine(scene, 'pine1', 9);
+  buildCityProps(scene);
 }
 
 // ------------------------------------------------------------------ minimapa / previsualización
@@ -665,6 +669,9 @@ const MINI_COLORS: Record<BiomeId, Record<string, string>> = {
   forest: { '.': '#4f9a45', '#': '#7b89a6', T: '#265c42', b: '#2f8a3c', r: '#8b9bb4', '~': '#2f7fd1', '=': '#b86f50' },
   desert: { '.': '#e6bf72', '#': '#bb8a5a', T: '#3e8948', R: '#a07a55', r: '#a07a55', q: '#a87d42' },
   snow: { '.': '#eaf1fb', '#': '#6f7f9e', T: '#265c42', n: '#b8c7e0', H: '#a22633', i: '#7cc8e8', d: '#d0dcf0', r: '#8b9bb4' },
+  paris: { '.': '#a9a49b', '#': '#7f8ea3', T: '#3e8948', ',': '#4f9a45', '~': '#4d7f8a', '=': '#bdb7ad', c: '#d8222c', M: '#2f6b4f', L: '#6e4f36', P: '#a9cfe0', b: '#2f8a3c' },
+  barcelona: { '.': '#bdb7ad', '#': '#d8b48a', T: '#3e8948', S: '#cdb98f', g: '#3f8fd8', k: '#3a9d63', s: '#efd9a0', '~': '#2f7fd1', b: '#2f8a3c' },
+  ceuta: { '.': '#efe6d2', '#': '#c9a46b', W: '#f6f4ee', T: '#3e8948', ',': '#4f9a45', '~': '#2f7fd1', '=': '#bdb7ad', s: '#efd9a0', C: '#7a5a34', r: '#8b9bb4', b: '#2f8a3c' },
 };
 
 export function buildMiniTexture(scene: Phaser.Scene, key: string, grid: Grid, id: BiomeId, scale: number): void {

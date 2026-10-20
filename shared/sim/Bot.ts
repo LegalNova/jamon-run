@@ -1,4 +1,4 @@
-import { AIParams, BALANCE, TILE } from '../balance';
+import { AIParams, BALANCE, RESCUE, TILE } from '../balance';
 import { DistField, Grid, Terrain } from '../grid';
 import type { BiomeId } from '../maps';
 import type { SimChar } from './Char';
@@ -18,7 +18,7 @@ export interface BotWorld {
   canSee(viewer: SimChar, target: SimChar): boolean;
 }
 
-type Mode = 'chase' | 'search' | 'flee' | 'item' | 'wander' | 'hide';
+type Mode = 'chase' | 'search' | 'flee' | 'item' | 'wander' | 'hide' | 'rescue';
 
 const rand = Math.random;
 
@@ -45,6 +45,7 @@ export class BotBrain {
   private stuckY = 0;
   private wanderTimer = 0;
   private lastSeen = new Map<number, { x: number; y: number; t: number }>();
+  private rescueTarget: SimChar | null = null;
 
   constructor(private ch: SimChar, private w: BotWorld) {
     this.decideTimer = rand() * 0.3;
@@ -80,7 +81,7 @@ export class BotBrain {
     let bestPos = { x: 0, y: 0 };
     let bestVisible = false;
     for (const e of w.chars) {
-      if (!e.alive || e.isChaser) continue;
+      if (!e.free || e.isChaser) continue;
       const visible = w.canSee(me, e);
       if (visible) this.lastSeen.set(e.id, { x: e.x, y: e.y, t: now });
       const seen = this.lastSeen.get(e.id);
@@ -155,6 +156,9 @@ export class BotBrain {
       newest = v.t;
       anchor = v;
     }
+    // A veces vigila a un rojo atrapado: alguien vendrá a rescatarlo.
+    const trapped = this.w.chars.filter((c) => c.trapped > 0 && !c.isChaser);
+    if (trapped.length && rand() < 0.6) anchor = trapped[Math.floor(rand() * trapped.length)];
     let bestTile = g.passable[Math.floor(rand() * g.passable.length)];
     let bestScore = -Infinity;
     for (let k = 0; k < 24; k++) {
@@ -183,7 +187,7 @@ export class BotBrain {
     let dirX = 0;
     let dirY = 0;
     let dist = Infinity;
-    if (t && t.alive && this.mode === 'chase') {
+    if (t && t.free && this.mode === 'chase') {
       const visible = w.canSee(me, t);
       dist = Math.hypot(t.x - me.x, t.y - me.y);
       if (visible && dist < 150 && w.grid.clearPath(me.x, me.y, t.x, t.y, me.radius)) {
@@ -253,6 +257,15 @@ export class BotBrain {
     const walkDanger = field.dist[myTile] * TILE;
     const danger = nearest !== null && (nd < ai.dangerRadius || walkDanger < ai.dangerRadius * 0.9);
 
+    // Rescate valiente: si un compañero atrapado está cerca y llego antes que los azules, voy.
+    const rescue = this.pickRescue(me, nearest, danger ? 6 : 22);
+    if (rescue) {
+      this.rescueTarget = rescue;
+      this.mode = 'rescue';
+      this.setGoal(g.tileOf(rescue.x, rescue.y), rescue.x, rescue.y);
+      return;
+    }
+
     if (danger) {
       this.mode = 'flee';
       const self = g.dijkstra([myTile], 13);
@@ -289,18 +302,21 @@ export class BotBrain {
     }
 
     // Sin peligro: ¿hay un objeto que merezca la pena?
+    const anyTrapped = w.chars.some((c) => c.trapped > 0 && !c.isChaser);
     let bestItem = -1;
     let bestItemScore = Infinity;
     for (const p of w.pickups) {
       if (p.dead) continue;
       if (p.type === 'medkit' && me.hp >= me.maxHp) continue;
       if (p.type === 'shield' && me.shield) continue;
+      if (p.type === 'gold' && !anyTrapped) continue;
       const pt = g.tileOf(p.x, p.y);
       const myD = Math.hypot(p.x - me.x, p.y - me.y);
       const chaserD = field.dist[pt] * TILE;
       if (myD > 20 * TILE || chaserD < myD * 1.3 + 30) continue;
       let s = myD;
       if (p.type === 'medkit') s -= (me.maxHp - me.hp) * 2;
+      if (p.type === 'gold') s -= 200;
       if (s < bestItemScore) {
         bestItemScore = s;
         bestItem = pt;
@@ -362,7 +378,9 @@ export class BotBrain {
 
     let dirX = 0;
     let dirY = 0;
-    if (this.mode !== 'hide') {
+    const rt = this.rescueTarget;
+    const rescuing = this.mode === 'rescue' && rt && rt.trapped > 0 && Math.hypot(rt.x - me.x, rt.y - me.y) < RESCUE.radius - 6;
+    if (this.mode !== 'hide' && !rescuing) {
       const p = this.followPath();
       dirX = p.x;
       dirY = p.y;
@@ -416,6 +434,31 @@ export class BotBrain {
       it.special = true;
       this.wantSmoke = false;
     }
+  }
+
+  /** Compañero atrapado al que merece la pena ir a rescatar (o null). */
+  private pickRescue(me: SimChar, nearestChaser: SimChar | null, maxTiles: number): SimChar | null {
+    const w = this.w;
+    let best: SimChar | null = null;
+    let bestD = Infinity;
+    for (const t of w.chars) {
+      if (t.isChaser || t.trapped <= 0 || t === me) continue;
+      const d = Math.hypot(t.x - me.x, t.y - me.y);
+      if (d > maxTiles * TILE) continue;
+      // ¿llego a tiempo?
+      if (d / (BALANCE.escapist.speed * 0.9) + RESCUE.rescueTime > t.trapped + 0.3) continue;
+      // el azul más cercano al atrapado no debe estar mucho más cerca que yo
+      let guard = Infinity;
+      for (const c of w.chars) if (c.isChaser && c.alive) guard = Math.min(guard, Math.hypot(c.x - t.x, c.y - t.y));
+      if (guard < 26 && d > 30) continue;
+      if (guard < d * 0.6) continue;
+      if (d < bestD) {
+        bestD = d;
+        best = t;
+      }
+    }
+    void nearestChaser;
+    return best;
   }
 
   /** Penalización por estar cerca de los bordes del mapa (ahí te acorralan). */

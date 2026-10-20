@@ -1,4 +1,4 @@
-import { BALANCE } from '../balance';
+import { BALANCE, CITY, RESCUE } from '../balance';
 import { clampToMap, moveCircle } from '../collision';
 import { Terrain } from '../grid';
 import type { Look } from '../look';
@@ -67,6 +67,13 @@ export class SimChar {
   specialBuf = 0;
   /** Enfriamiento de las frases (bocadillos). */
   sayCd = 0;
+  /** Segundos que le quedan atrapado (0 = libre). */
+  trapped = 0;
+  /** Progreso del rescate (0..1). */
+  rescueProg = 0;
+  /** Quién lo atrapó (para las estadísticas). */
+  trappedBy = -1;
+  metroCd = 0;
 
   stats: Stats = emptyStats();
   deathTime = -1;
@@ -93,6 +100,11 @@ export class SimChar {
 
   get isChaser(): boolean {
     return this.team === 'chaser';
+  }
+
+  /** Rojo vivo y sin atrapar (los azules siempre están libres). */
+  get free(): boolean {
+    return this.alive && this.trapped <= 0;
   }
 
   get speedNow(): number {
@@ -123,7 +135,7 @@ export class SimChar {
       this.updateGhost(dt, ctx, it);
       return;
     }
-    if (!ctx.canMove(this)) {
+    if (!ctx.canMove(this) || this.trapped > 0) {
       it.mx = it.my = 0;
       it.action = it.special = it.sprint = false;
     }
@@ -178,6 +190,7 @@ export class SimChar {
     if (this.terrain === Terrain.Quicksand) speed *= T.quicksandSlow;
     else if (this.terrain === Terrain.DeepSnow) speed *= T.deepSnowSlow;
     if (this.bootTime > 0) speed *= B.items.bootMultiplier;
+    if (this.terrain === Terrain.Lane) speed *= CITY.laneMultiplier;
 
     const wantSprint = it.sprint && len > 0.1 && this.exhaustTimer <= 0 && this.energy > 0;
     this.sprinting = wantSprint;
@@ -247,7 +260,12 @@ export class SimChar {
     if (Math.abs(this.kby) < 1) this.kby = 0;
 
     const p = { x: this.x, y: this.y };
-    const hit = moveCircle(grid, p, (this.vx + this.kbx) * dt, (this.vy + this.kby) * dt, this.radius);
+    const wx = this.trapped > 0 ? 0 : ctx.wind.x;
+    const wy = this.trapped > 0 ? 0 : ctx.wind.y;
+    if (this.trapped > 0) {
+      this.vx = this.vy = 0;
+    }
+    const hit = moveCircle(grid, p, (this.vx + this.kbx + wx) * dt, (this.vy + this.kby + wy) * dt, this.radius);
     if (hit.hitX) {
       this.vx *= onIce ? -0.3 : 0;
       this.kbx *= -0.4;
@@ -324,7 +342,7 @@ export class SimChar {
   // ------------------------------------------------------------------ daño
 
   takeHit(ctx: SimCtx, dmg: number, attacker: SimChar | null, nx: number, ny: number, kb: number): HitResult {
-    if (!this.alive || this.isChaser) return 'none';
+    if (!this.alive || this.isChaser || this.trapped > 0) return 'none';
     if (this.dashTime > 0 && B.escapist.dashIFrames) {
       this.stats.dodges++;
       ctx.emit({ t: 'dodge', v: this.id });
@@ -354,15 +372,43 @@ export class SimChar {
     }
     ctx.emit({ t: 'hit', v: this.id, a: attacker ? attacker.id : -1, dmg, nx, ny });
     if (this.hp <= 0) {
-      this.alive = false;
-      this.deathTime = ctx.matchTime;
-      this.vx = this.vy = this.kbx = this.kby = 0;
+      if (attacker) attacker.stats.eliminations++;
       this.dashTime = 0;
       this.shield = false;
-      if (attacker) attacker.stats.eliminations++;
-      ctx.emit({ t: 'ko', v: this.id, a: attacker ? attacker.id : -1 });
+      this.bootTime = 0;
+      if (RESCUE.enabled) {
+        // Enjamonado: espera a que le rescaten.
+        this.trapped = RESCUE.trapSeconds;
+        this.rescueProg = 0;
+        this.trappedBy = attacker ? attacker.id : -1;
+        this.vx = this.vy = 0;
+        ctx.emit({ t: 'trap', v: this.id, a: attacker ? attacker.id : -1 });
+      } else {
+        this.knockOut(ctx, attacker ? attacker.id : -1);
+      }
     }
     return 'hit';
+  }
+
+  /** Fuera de la partida: se convierte en fantasma. */
+  knockOut(ctx: SimCtx, by: number): void {
+    this.alive = false;
+    this.trapped = 0;
+    this.rescueProg = 0;
+    this.deathTime = ctx.matchTime;
+    this.vx = this.vy = this.kbx = this.kby = 0;
+    this.dashTime = 0;
+    this.shield = false;
+    ctx.emit({ t: 'ko', v: this.id, a: by });
+  }
+
+  /** Liberado por un compañero. */
+  release(): void {
+    this.trapped = 0;
+    this.rescueProg = 0;
+    this.hp = Math.max(this.hp, RESCUE.reviveHp);
+    this.invuln = RESCUE.reviveInvuln;
+    this.stun = 0;
   }
 
   heal(n: number): void {

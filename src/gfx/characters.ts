@@ -27,8 +27,9 @@ interface Pose {
 
 /** Colores del uniforme de cada equipo (o ropa propia si no hay equipo). */
 const UNIFORM = {
-  // Equipo ROJO (los que huyen): chándal rojo, gorra GUCHI, cadena dorada, riñonera y zapatillas blancas.
-  escapist: { shirt: '#d8222c', shirtDark: '#9c1820', shirtLight: '#ff6a5a', pants: '#c01c26', pantsDark: '#8a141c', shoe: '#f4f4f4' },
+  // Equipo ROJO (los que huyen): chándal oscuro estilo "Guchi" (parodia), gorra roja, cadena dorada,
+  // riñonera y zapatillas blancas. Tonos oscuros para que destaquen en todos los mapas.
+  escapist: { shirt: '#2a2530', shirtDark: '#17141d', shirtLight: '#4a4256', pants: '#242029', pantsDark: '#15121a', shoe: '#f4f4f4' },
   // Equipo AZUL (los que pillan): uniforme azul.
   chaser: { shirt: '#2a6be0', shirtDark: '#1a429a', shirtLight: '#7cc8ff', pants: '#1d2f6b', pantsDark: '#141f4a', shoe: '#1f1a2b' },
 };
@@ -495,10 +496,8 @@ function drawHat(p: Painter, hat: number, dir: Dir, C: Colors, guchi: boolean): 
     p.h(5, -1, shade(R, 40));
     if (dir === 'down') {
       p.hr(2, 3, 12, 1, Rd);
-      p.h(7, 0, GOLD);
-      p.h(8, 0, GOLD);
-      p.h(7, 1, GOLD);
-      p.h(8, 1, GOLD_DARK);
+      // "GG" dorado (parodia del monograma)
+      [[5, 0], [6, 0], [5, 1], [5, 2], [6, 2], [8, 0], [9, 0], [8, 1], [8, 2], [9, 2], [9, 1]].forEach(([x, y]) => p.h(x, y, GOLD));
     } else if (dir === 'side') {
       for (let x = 9; x <= 14; x++) p.h(x, 3, Rd);
       p.h(9, 1, GOLD);
@@ -592,6 +591,8 @@ function drawHead(p: Painter, team: Team | null, look: Look, dir: Dir, pose: Pos
   drawHair(p, look.hair, dir, C, hatOn);
   drawFace(p, team, dir, pose, C);
   drawExtra(p, look.extra, dir, C);
+  if (guchi && dir === 'down') p.h(12, 8, GOLD);
+  if (guchi && dir === 'side') p.h(7, 8, GOLD);
   drawGlasses(p, look.glasses, dir);
   drawHat(p, look.hat, dir, C, guchi);
 }
@@ -612,9 +613,10 @@ function drawBody(p: Painter, team: Team | null, dir: Dir, pose: Pose, C: Colors
     for (let x = 5; x <= 10; x++) p.b(x, 12, C.shirtDark);
     p.b(9, 10, C.shirtLight);
     if (red) {
-      p.b(6, 10, PAL.white);
-      p.b(6, 11, PAL.white);
+      p.b(6, 10, '#2f9e5a');
+      p.b(6, 11, '#d8222c');
       p.b(10, 10, GOLD); // cadena
+      p.b(10, 11, GOLD);
       p.b(9, 12, C.own); // riñonera
       p.b(10, 12, C.own);
     }
@@ -632,21 +634,30 @@ function drawBody(p: Painter, team: Team | null, dir: Dir, pose: Pose, C: Colors
       leg(4, C.pants);
       leg(9, C.pantsDark);
     }
-    if (red) p.b(9, 13, PAL.white);
+    if (red) p.b(9, 13, '#2f9e5a');
     return;
   }
   for (let y = 10; y <= 11; y++) for (let x = 4; x <= 11; x++) p.b(x, y, C.shirt);
   for (let x = 5; x <= 10; x++) p.b(x, 12, C.shirtDark);
+  // estampado de monograma tipo "GG" sobre el chándal oscuro (parodia)
+  if (red) for (let y = 10; y <= 13; y++) for (let x = 4; x <= 11; x++) if ((x + y * 2) % 4 === 0) p.b(x, y, '#5a4a32');
   if (dir === 'down') {
     p.b(6, 10, C.shirtLight);
     if (red) {
-      // cadena dorada, cremallera y rayas blancas del chándal
+      // cadena dorada gorda con medallón y raya verde-roja-verde en las mangas
+      p.b(5, 10, GOLD);
       p.b(6, 10, GOLD);
+      p.b(6, 11, GOLD_DARK);
       p.b(7, 11, GOLD);
       p.b(8, 11, GOLD);
+      p.b(9, 11, GOLD_DARK);
       p.b(9, 10, GOLD);
-      p.b(4, 10, PAL.white);
-      p.b(11, 10, PAL.white);
+      p.b(10, 10, GOLD);
+      p.b(7, 12, GOLD);
+      p.b(4, 10, '#2f9e5a');
+      p.b(4, 11, '#d8222c');
+      p.b(11, 10, '#2f9e5a');
+      p.b(11, 11, '#d8222c');
       // riñonera
       for (let x = 5; x <= 10; x++) p.b(x, 12, C.own);
       p.b(7, 12, GOLD);
@@ -661,8 +672,10 @@ function drawBody(p: Painter, team: Team | null, dir: Dir, pose: Pose, C: Colors
       p.b(7, 11, C.shirtLight);
     }
   } else if (red) {
-    p.b(4, 10, PAL.white);
-    p.b(11, 10, PAL.white);
+    p.b(4, 10, '#2f9e5a');
+    p.b(11, 10, '#2f9e5a');
+    p.b(4, 11, '#d8222c');
+    p.b(11, 11, '#d8222c');
     p.b(7, 10, GOLD);
     p.b(8, 10, GOLD);
   }
@@ -675,8 +688,8 @@ function drawBody(p: Painter, team: Team | null, dir: Dir, pose: Pose, C: Colors
   const legR = pose.legs !== 'L';
   [5, 6, 9, 10].forEach((x) => p.b(x, 13, C.pants));
   if (red) {
-    p.b(5, 13, PAL.white);
-    p.b(10, 13, PAL.white);
+    p.b(5, 13, '#2f9e5a');
+    p.b(10, 13, '#d8222c');
   }
   const foot = (x: number, down: boolean) => {
     p.b(x, down ? 14 : 13, C.shoe);
@@ -843,6 +856,27 @@ function buildItems(scene: Phaser.Scene): void {
     '..yyyyyyyyy',
     '..ddddddddd',
   ], { w: PAL.white, y: PAL.yellow, b: PAL.blue, d: '#b85c18' });
+  icon(scene, 'item_gold', [
+    '......ggg..',
+    '....gglllg.',
+    'bwgggllyllg',
+    'bwgggllllyg',
+    'bwGGglllllg',
+    '....GGllllg',
+    '......GGGG.',
+  ], { b: PAL.hoof, w: PAL.hamBone, g: '#ffd23f', G: '#c79a1c', l: '#ffe680', y: '#ffffff' });
+  // jaula de los rojos atrapados ("enjamonados")
+  {
+    const g = new PixelGrid(18, 22);
+    for (let x = 1; x <= 16; x += 3) for (let y = 2; y <= 20; y++) g.set(x, y, y % 4 === 0 ? '#c2414b' : '#f6dcc0');
+    for (let x = 1; x <= 16; x++) {
+      g.set(x, 1, '#7a3b22');
+      g.set(x, 2, '#c2414b');
+      g.set(x, 20, '#7a3b22');
+    }
+    g.outline(PAL.outline);
+    gridTexture(scene, 'cage', g);
+  }
   icon(scene, 'item_shield', [
     '.ccccccccc.',
     'cclllllllcc',

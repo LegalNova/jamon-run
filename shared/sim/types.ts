@@ -3,7 +3,7 @@ import type { Grid } from '../grid';
 import type { Look } from '../look';
 
 export type Team = 'chaser' | 'escapist';
-export type PickupType = 'medkit' | 'boot' | 'shield';
+export type PickupType = 'medkit' | 'boot' | 'shield' | 'gold';
 export type MatchState = 'countdown' | 'play' | 'ended';
 
 /** Lo que un controlador (jugador o bot) pide hacer en este paso. */
@@ -37,6 +37,7 @@ export interface Stats {
   dodges: number;
   blocks: number;
   throwsHit: number;
+  rescues: number;
 }
 
 export const emptyStats = (): Stats => ({
@@ -49,6 +50,7 @@ export const emptyStats = (): Stats => ({
   dodges: 0,
   blocks: 0,
   throwsHit: 0,
+  rescues: 0,
 });
 
 /** Eventos de la simulación: la vista los convierte en efectos y sonidos (y viajan por la red). */
@@ -67,7 +69,13 @@ export type SimEvent =
   | { t: 'smoke'; sid: number; x: number; y: number }
   | { t: 'itemSpawn'; iid: number; type: PickupType; x: number; y: number }
   | { t: 'pickup'; iid: number; id: number; type: PickupType; x: number; y: number }
-  | { t: 'say'; id: number; p: number };
+  | { t: 'say'; id: number; p: number }
+  /** Pillado: queda atrapado esperando rescate. */
+  | { t: 'trap'; v: number; a: number }
+  | { t: 'rescue'; v: number; by: number }
+  | { t: 'streak'; id: number; n: number }
+  | { t: 'metro'; id: number; x0: number; y0: number; x1: number; y1: number }
+  | { t: 'wind'; on: boolean; dx: number };
 
 /** Quién juega una partida. */
 export interface RosterEntry {
@@ -86,6 +94,8 @@ export interface SimCtx {
   matchTime: number;
   canMove(c: { team: Team }): boolean;
   inSmoke(x: number, y: number): boolean;
+  /** Viento (Ceuta): empuje en px/s. */
+  wind: { x: number; y: number };
   emit(e: SimEvent): void;
   /** Golpe cuerpo a cuerpo resuelto por el mundo (no-op en la predicción). */
   meleeHit(attackerId: number): void;

@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { PHRASES } from '../../shared/balance';
+import { PHRASES, RESCUE } from '../../shared/balance';
 import { LOOK_COLORS } from '../../shared/look';
 import { SimChar, SWING_TIME } from '../../shared/sim/Char';
 import { Grid, Terrain } from '../../shared/grid';
@@ -33,6 +33,8 @@ export class CharacterView {
   private flashT = 0;
   private ghost = false;
   private ghostLift = 0;
+  private cage: Phaser.GameObjects.Image;
+  private trapG: Phaser.GameObjects.Graphics;
 
   constructor(
     private scene: Phaser.Scene,
@@ -50,6 +52,8 @@ export class CharacterView {
     if (c.isChaser) this.ham = scene.add.image(c.x, c.y, 'ham').setOrigin(2 / 15, 4.5 / 9);
     this.shieldRing = scene.add.image(c.x, c.y, 'p_ring').setTint(0x7cc8ff).setVisible(false).setScale(1.25);
     this.hpBar = scene.add.graphics().setDepth(8990);
+    this.cage = scene.add.image(c.x, c.y, 'cage').setOrigin(0.5, 1).setVisible(false);
+    this.trapG = scene.add.graphics().setDepth(8995);
     if (showName && !isPlayer) {
       const col = hexToInt(LOOK_COLORS[c.look.color]?.hex ?? '#ffffff');
       this.nameTag = scene.add
@@ -84,6 +88,8 @@ export class CharacterView {
     this.shieldRing.setVisible(false);
     this.ham?.setVisible(false);
     this.hpBar.clear();
+    this.cage.setVisible(false);
+    this.trapG.clear();
   }
 
   say(phrase: number, c: SimChar): void {
@@ -124,6 +130,47 @@ export class CharacterView {
       this.sprite.setAlpha(this.isPlayer ? 0.8 : 0.45);
       this.sprite.setFlipX(c.intent.mx < 0);
       this.nameTag?.setPosition(Math.round(c.x), Math.round(footY - 18 - this.ghostLift + bob)).setAlpha(0.5);
+      return;
+    }
+
+    // Enjamonado: dentro de la jaula esperando rescate.
+    this.cage.setVisible(c.trapped > 0 && !hidden);
+    this.trapG.clear();
+    if (c.trapped > 0) {
+      const k = `${this.key}_down_hurt`;
+      if (k !== this.animKey) {
+        this.sprite.play(k, true);
+        this.animKey = k;
+      }
+      if (this.tinted) {
+        this.sprite.clearTint();
+        this.tinted = false;
+      }
+      const shake = Math.sin(this.clock * 30) * (c.rescueProg > 0 ? 1 : 0);
+      this.sprite.setPosition(c.x + shake, footY).setDepth(c.y).setAlpha(hidden ? 0.18 : 1).setFlipX(false);
+      this.shadow.setPosition(c.x, footY);
+      this.cage.setPosition(c.x, footY + 2).setDepth(c.y + 1);
+      this.ham?.setVisible(false);
+      this.shieldRing.setVisible(false);
+      this.hpBar.clear();
+      this.lastHpDrawn = -3;
+      const bob = Math.round(Math.sin(this.clock * 5) * 1.2);
+      this.indicator.setPosition(c.x, footY - 27 + bob).setVisible(!hidden);
+      this.nameTag?.setPosition(Math.round(c.x), Math.round(footY - 31 + bob)).setVisible(!hidden);
+      if (!hidden) {
+        // aro con el tiempo que le queda y barra de rescate
+        const frac = Math.max(0, c.trapped / RESCUE.trapSeconds);
+        const urgent = c.trapped < 4 && Math.floor(this.clock * 6) % 2 === 0;
+        this.trapG.lineStyle(2, urgent ? 0xffffff : 0xfeae34, 0.9);
+        this.trapG.beginPath();
+        this.trapG.arc(c.x, footY - 9, 13, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2, false);
+        this.trapG.strokePath();
+        if (c.rescueProg > 0) {
+          const w = 18;
+          this.trapG.fillStyle(0x1a1424, 1).fillRect(c.x - w / 2 - 1, footY + 4, w + 2, 4);
+          this.trapG.fillStyle(0x63c74d, 1).fillRect(c.x - w / 2, footY + 5, Math.round(w * Math.min(1, c.rescueProg)), 2);
+        }
+      }
       return;
     }
 
@@ -261,5 +308,7 @@ export class CharacterView {
     this.hpBar.destroy();
     this.nameTag?.destroy();
     this.bubble?.destroy();
+    this.cage.destroy();
+    this.trapG.destroy();
   }
 }

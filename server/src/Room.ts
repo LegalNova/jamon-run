@@ -368,6 +368,7 @@ export class Room extends DurableObject<Env> {
       p: sim.pickups.map((p) => [p.iid, PICKUPS.indexOf(p.type), Math.round(p.x), Math.round(p.y), Math.round(p.life)]),
       j: sim.projectiles.map((p) => [p.pid, Math.round(p.x), Math.round(p.y), Math.round(p.dx * 100), Math.round(p.dy * 100), Math.round(p.travelled)]),
       k: sim.smokes.map((s) => [s.sid, Math.round(s.x), Math.round(s.y), Math.round(s.life * 10)]),
+      w: [Math.round(sim.wind.x * 10), Math.round(sim.wind.y * 10)],
       e: events,
     };
     const common = JSON.stringify(snap);

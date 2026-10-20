@@ -65,7 +65,7 @@ export class ResultsScene extends Phaser.Scene {
             ['TIEMPO SOBREVIVIDO', mmss(s.timeSurvived)],
             ['GOLPES RECIBIDOS', String(s.hitsTaken)],
             ['ESQUIVAS (DASH)', String(s.dodges)],
-            ['GOLPES BLOQUEADOS', String(s.blocks)],
+            ['RESCATES', String(s.rescues ?? 0)],
             ['OBJETOS COGIDOS', String(s.items)],
             ['ESTADO FINAL', player.alive ? 'VIVO' : 'ELIMINADO'],
           ];
@@ -98,14 +98,14 @@ export class ResultsScene extends Phaser.Scene {
         ? e.team === 'chaser'
           ? `${e.stats.eliminations}P ${e.stats.hits}G`
           : e.alive
-            ? 'VIVO'
+            ? `VIVO R${e.stats.rescues ?? 0}`
             : mmss(e.stats.timeSurvived)
         : e.team === 'chaser'
           ? `PILLADOS ${e.stats.eliminations} · GOLPES ${e.stats.hits}`
-          : `${e.alive ? 'VIVO' : 'FUERA'} · ${mmss(e.stats.timeSurvived)} · OBJ ${e.stats.items}`;
+          : `${e.alive ? 'VIVO' : 'FUERA'} · ${mmss(e.stats.timeSurvived)} · RESC ${e.stats.rescues ?? 0}`;
       this.add.bitmapText(x1, y, FONT, fontText(stat)).setOrigin(1, 0.5).setTint(e.alive || e.team === 'chaser' ? UI.text : UI.muted);
     });
-    if (twoCols) text(this, 330, 196, 'P = PILLADOS · G = GOLPES · TIEMPO = AGUANTÓ', { color: UI.muted });
+    if (twoCols) text(this, 330, 196, 'P = PILLADOS · G = GOLPES · R = RESCATES', { color: UI.muted });
     if (mvp) text(this, 330, 208, `MVP: ${mvp.name}`, { color: 0xfee761 });
 
     this.menu = new Menu(true);
@@ -126,7 +126,9 @@ export class ResultsScene extends Phaser.Scene {
     const team = entries.filter((e) => e.team === winner);
     if (!team.length) return null;
     const score = (e: ResultEntry) =>
-      e.team === 'chaser' ? e.stats.eliminations * 100 + e.stats.hits * 10 : (e.alive ? 1000 : 0) + e.stats.timeSurvived + e.stats.dodges * 5 + e.stats.items * 3;
+      e.team === 'chaser'
+        ? e.stats.eliminations * 100 + e.stats.hits * 10
+        : (e.alive ? 1000 : 0) + e.stats.timeSurvived + (e.stats.rescues ?? 0) * 60 + e.stats.dodges * 5 + e.stats.items * 3;
     return team.reduce((a, b) => (score(b) > score(a) ? b : a));
   }
 

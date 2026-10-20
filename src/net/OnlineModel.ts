@@ -20,6 +20,7 @@ interface Snap {
   p: number[][];
   j: number[][];
   k: number[][];
+  w: [number, number];
 }
 
 const INPUT_INTERVAL = 1000 / NET.inputRate;
@@ -85,6 +86,7 @@ export class OnlineModel implements GameModel {
       matchTime: 0,
       canMove: (c) => this.state === 'play' && (c.team !== 'chaser' || this.matchTime >= BALANCE.match.chaserReleaseDelay),
       inSmoke: (x, y) => this.smokes.some((s) => (x - s.x) ** 2 + ((y - s.y) * 1.2) ** 2 < s.radius * s.radius),
+      wind: { x: 0, y: 0 },
       emit: (e) => this.localEvents.push(e),
       meleeHit: () => undefined,
       throwHam: () => undefined,
@@ -124,7 +126,10 @@ export class OnlineModel implements GameModel {
     }
     const c = new Map<number, number[]>();
     for (const e of s.c) c.set(e[0], e);
-    const snap: Snap = { ts: s.ts, st: STATES[s.st] ?? 'play', tl: s.tl / 10, mt: s.mt / 10, c, p: s.p, j: s.j, k: s.k };
+    const snap: Snap = { ts: s.ts, st: STATES[s.st] ?? 'play', tl: s.tl / 10, mt: s.mt / 10, c, p: s.p, j: s.j, k: s.k, w: s.w ?? [0, 0] };
+    // el viento lo aplicamos ya a la predicción
+    this.ctx.wind.x = snap.w[0] / 10;
+    this.ctx.wind.y = snap.w[1] / 10;
     this.snaps.push(snap);
     while (this.snaps.length > 40) this.snaps.shift();
     for (const e of s.e) this.pending.push({ ts: s.ts, e });
@@ -143,6 +148,8 @@ export class OnlineModel implements GameModel {
     me.shield = (flags & F.shield) !== 0;
     me.stun = flags & F.stun ? Math.max(me.stun, 0.05) : Math.min(me.stun, 0);
     me.invuln = flags & F.invuln ? Math.max(me.invuln, 0.05) : 0;
+    me.trapped = e[10] !== undefined ? e[10] / 10 : 0;
+    me.rescueProg = e[11] !== undefined ? e[11] / 100 : 0;
     if (wasAlive && !me.alive) this.history = [];
     if (m) {
       // Cooldowns: confiamos en la predicción salvo que se aleje mucho.
@@ -301,6 +308,8 @@ export class OnlineModel implements GameModel {
       c.stun = f & F.stun ? 0.1 : 0;
       c.hamHidden = f & F.hamHidden ? 0.1 : 0;
       c.human = (f & F.human) !== 0;
+      c.trapped = (eb[10] ?? 0) / 10;
+      c.rescueProg = (eb[11] ?? 0) / 100;
       c.intent.mx = Math.sign(c.vx);
     }
     // primera colocación de tu personaje

@@ -1,13 +1,12 @@
-import { AIParams, BALANCE, Difficulty, PHRASES, TILE } from '../balance';
+import { AIParams, BALANCE, CITY, Difficulty, PHRASES, RESCUE, TILE } from '../balance';
 import { resolveCircle } from '../collision';
-import { DistField, Grid, Terrain } from '../grid';
+import { DistField, Grid, SHOT_BLOCKERS, Terrain } from '../grid';
 import { BiomeId } from '../maps';
 import { buildRows, MapScale } from '../mapScale';
 import { BotBrain, BotWorld } from './Bot';
 import { SimChar, wrapAngle, PRESS_BUFFER } from './Char';
 import { emptyIntent, HeldInput, Intent, MatchState, PickupType, RosterEntry, SimCtx, SimEvent, Team } from './types';
 
-const BLOCKERS = '#TRHnr';
 
 export class SimProjectile {
   travelled = 0;
@@ -71,6 +70,12 @@ export class Sim implements SimCtx, BotWorld {
   private danger: DistField | null = null;
   private dangerTimer = 0;
   private released = false;
+  /** Viento de levante (solo Ceuta). */
+  wind = { x: 0, y: 0 };
+  private windTimer: number = CITY.levante.firstAt;
+  private windOn = false;
+  private windDir = -1;
+  private streaks = new Map<number, { t: number; n: number }>();
 
   constructor(o: SimOptions) {
     this.mapId = o.mapId;
@@ -165,6 +170,12 @@ export class Sim implements SimCtx, BotWorld {
   emit(e: SimEvent): void {
     this.events.push(e);
     this.autoSay(e);
+    if (e.t === 'trap' && e.a >= 0) {
+      const s = this.streaks.get(e.a);
+      const n = s && this.matchTime - s.t < CITY.streakWindow ? s.n + 1 : 1;
+      this.streaks.set(e.a, { t: this.matchTime, n });
+      if (n >= 2) this.events.push({ t: 'streak', id: e.a, n });
+    }
   }
 
   /** Un personaje dice una frase (bocadillo + voz en el cliente). */
@@ -184,14 +195,22 @@ export class Sim implements SimCtx, BotWorld {
   private autoSay(e: SimEvent): void {
     const ch = PHRASES.chance;
     if (e.t === 'hit') {
-      this.sayMaybe(e.v, ch.hit, [4, 6]);
-      if (e.a >= 0) this.sayMaybe(e.a, ch.hit * 0.6, [2]);
-    } else if (e.t === 'ko' && e.a >= 0) {
-      this.sayMaybe(e.a, ch.ko, [3]);
+      this.sayMaybe(e.v, ch.hit, [4, 6, 21]);
+      if (e.a >= 0) this.sayMaybe(e.a, ch.hit * 0.6, [2, 14, 15]);
+    } else if (e.t === 'trap') {
+      // el atrapado pide ayuda y el que pilla presume
+      const v = this.byId.get(e.v);
+      if (v) v.sayCd = 0;
+      this.sayMaybe(e.v, ch.ko, [18, 4]);
+      if (e.a >= 0) this.sayMaybe(e.a, ch.ko, [3, 17]);
+    } else if (e.t === 'rescue') {
+      const v = this.byId.get(e.v);
+      if (v) v.sayCd = 0;
+      this.sayMaybe(e.v, ch.rescue, [20, 10]);
     } else if (e.t === 'dodge') {
-      this.sayMaybe(e.v, ch.dodge, [5]);
+      this.sayMaybe(e.v, ch.dodge, [5, 21]);
     } else if (e.t === 'release') {
-      for (const c of this.chars) if (c.isChaser) this.sayMaybe(c.id, ch.release, [0, 1]);
+      for (const c of this.chars) if (c.isChaser) this.sayMaybe(c.id, ch.release, [0, 1, 16]);
     }
   }
 
@@ -237,7 +256,7 @@ export class Sim implements SimCtx, BotWorld {
     if (!a) return;
     const C = BALANCE.chaser;
     for (const c of this.chars) {
-      if (!c.alive || c.isChaser) continue;
+      if (!c.free || c.isChaser) continue;
       const dx = c.x - a.x;
       const dy = c.y - a.y;
       const d = Math.hypot(dx, dy);
@@ -284,8 +303,10 @@ export class Sim implements SimCtx, BotWorld {
         this.released = true;
         this.emit({ t: 'release' });
       }
-      for (const c of this.chars) if (c.alive && !c.isChaser) c.stats.timeSurvived += dt;
+      for (const c of this.chars) if (c.free && !c.isChaser) c.stats.timeSurvived += dt;
       this.updateItems(dt);
+      this.updateRescues(dt);
+      this.updateCity(dt);
     }
 
     this.dangerTimer -= dt;
@@ -365,12 +386,12 @@ export class Sim implements SimCtx, BotWorld {
         p.y += (p.dy * step) / n;
         p.travelled += step / n;
         const ch = this.grid.charAt(Math.floor(p.x / TILE), Math.floor(p.y / TILE));
-        if (BLOCKERS.includes(ch)) {
+        if (SHOT_BLOCKERS.includes(ch)) {
           this.endProjectile(p, true);
           break;
         }
         for (const c of this.chars) {
-          if (!c.alive || c.isChaser) continue;
+          if (!c.free || c.isChaser) continue;
           if (Math.hypot(c.x - p.x, c.y - p.y) < c.radius + 5) {
             const owner = this.byId.get(p.owner) ?? null;
             const r = c.takeHit(this, C.throwDamage, owner, p.dx, p.dy, C.throwKnockback);
@@ -410,10 +431,11 @@ export class Sim implements SimCtx, BotWorld {
     if (!free.length) return;
     const t = free[Math.floor(Math.random() * free.length)];
     const w = BALANCE.items.weights;
-    let r = Math.random() * (w.medkit + w.boot + w.shield);
-    let type: PickupType = 'shield';
+    let r = Math.random() * (w.medkit + w.boot + w.shield + w.gold);
+    let type: PickupType = 'gold';
     if ((r -= w.medkit) < 0) type = 'medkit';
     else if ((r -= w.boot) < 0) type = 'boot';
+    else if ((r -= w.shield) < 0) type = 'shield';
     const c = g.tileCenter(t);
     const p = new SimPickup(this.nextIid++, type, c.x, c.y, t);
     this.pickups.push(p);
@@ -424,12 +446,24 @@ export class Sim implements SimCtx, BotWorld {
     for (const p of this.pickups) {
       if (p.dead) continue;
       for (const c of this.chars) {
-        if (!c.alive || Math.hypot(c.x - p.x, c.y - p.y) > 11) continue;
+        if (!c.free || Math.hypot(c.x - p.x, c.y - p.y) > 11) continue;
         if (p.type === 'medkit' && (c.isChaser || c.hp >= c.maxHp)) continue;
         if (p.type === 'shield' && (c.isChaser || c.shield)) continue;
+        if (p.type === 'gold' && c.isChaser) continue;
         if (p.type === 'medkit') c.heal(BALANCE.items.medkitHeal);
         else if (p.type === 'boot') c.bootTime = BALANCE.items.bootDuration;
-        else c.shield = true;
+        else if (p.type === 'shield') c.shield = true;
+        else {
+          // Jamón de oro: libera a todos los compañeros atrapados.
+          for (const t of this.chars) {
+            if (t.trapped > 0 && !t.isChaser) {
+              t.release();
+              c.stats.rescues++;
+              this.emit({ t: 'rescue', v: t.id, by: c.id });
+            }
+          }
+          this.say(c.id, 22);
+        }
         c.stats.items++;
         p.dead = true;
         this.emit({ t: 'pickup', iid: p.iid, id: c.id, type: p.type, x: p.x, y: p.y });
@@ -439,8 +473,72 @@ export class Sim implements SimCtx, BotWorld {
     this.pickups = this.pickups.filter((p) => !p.dead);
   }
 
+  /** Rojos atrapados: se liberan si un compañero se queda a su lado; si no, quedan fuera. */
+  private updateRescues(dt: number): void {
+    for (const c of this.chars) {
+      if (c.trapped <= 0) continue;
+      c.trapped -= dt;
+      let rescuer: SimChar | null = null;
+      for (const o of this.chars) {
+        if (o === c || o.isChaser || !o.free) continue;
+        if (Math.hypot(o.x - c.x, o.y - c.y) <= RESCUE.radius) {
+          rescuer = o;
+          break;
+        }
+      }
+      if (rescuer) c.rescueProg += dt / RESCUE.rescueTime;
+      else c.rescueProg = Math.max(0, c.rescueProg - RESCUE.decay * dt);
+      if (rescuer && c.rescueProg >= 1) {
+        c.release();
+        rescuer.stats.rescues++;
+        this.emit({ t: 'rescue', v: c.id, by: rescuer.id });
+      } else if (c.trapped <= 0) {
+        c.knockOut(this, c.trappedBy);
+      }
+    }
+  }
+
+  /** Mecánicas de las ciudades: metro (París) y levante (Ceuta). */
+  private updateCity(dt: number): void {
+    const g = this.grid;
+    if (g.metroTiles.length > 1) {
+      for (const c of this.chars) {
+        c.metroCd -= dt;
+        // Solo las personas usan el metro (es un truco del jugador; los bots lo pisarían sin querer).
+        if (!c.human || !c.free || c.metroCd > 0 || g.terrainAt(c.x, c.y) !== Terrain.Metro) continue;
+        const here = g.tileOf(c.x, c.y);
+        const i = g.metroTiles.indexOf(here);
+        const dest = g.metroTiles[(i + 1) % g.metroTiles.length];
+        const p = g.tileCenter(dest);
+        const x0 = c.x;
+        const y0 = c.y;
+        c.x = p.x;
+        c.y = p.y + 2;
+        c.metroCd = CITY.metroCooldown;
+        this.emit({ t: 'metro', id: c.id, x0: Math.round(x0), y0: Math.round(y0), x1: Math.round(c.x), y1: Math.round(c.y) });
+      }
+    }
+    if (this.mapId === 'ceuta') {
+      const L = CITY.levante;
+      this.windTimer -= dt;
+      if (!this.windOn && this.windTimer <= 0) {
+        this.windOn = true;
+        this.windTimer = L.duration;
+        this.windDir = Math.random() < 0.8 ? -1 : 1; // el levante sopla hacia el oeste
+        this.emit({ t: 'wind', on: true, dx: this.windDir });
+      } else if (this.windOn && this.windTimer <= 0) {
+        this.windOn = false;
+        this.windTimer = L.interval;
+        this.emit({ t: 'wind', on: false, dx: 0 });
+      }
+      const target = this.windOn ? this.windDir * L.force : 0;
+      this.wind.x += (target - this.wind.x) * Math.min(1, dt * 2);
+      this.wind.y = this.windOn ? Math.sin(this.matchTime * 3) * 6 : 0;
+    }
+  }
+
   private checkEnd(): void {
-    const aliveEsc = this.chars.some((c) => c.alive && !c.isChaser);
+    const aliveEsc = this.chars.some((c) => c.free && !c.isChaser);
     if (!aliveEsc) this.end('chaser');
     else if (this.timeLeft <= 0) this.end('escapist');
   }

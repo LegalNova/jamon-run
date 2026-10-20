@@ -36,6 +36,7 @@ export class UIScene extends Phaser.Scene {
   private centerSub!: Phaser.GameObjects.BitmapText;
   private ghostHint!: Phaser.GameObjects.BitmapText;
   private hiddenHint!: Phaser.GameObjects.BitmapText;
+  private trapHint!: Phaser.GameObjects.BitmapText;
   private flash!: Phaser.GameObjects.Rectangle;
   private vignette!: Phaser.GameObjects.Graphics;
   private t = 0;
@@ -138,6 +139,7 @@ export class UIScene extends Phaser.Scene {
       color: 0xc2c3c7,
     }).setVisible(false);
     this.hiddenHint = text(this, VIEW_W / 2, VIEW_H - 12, 'ESCONDIDO EN EL ARBUSTO', { color: 0x63c74d }).setVisible(false);
+    this.trapHint = text(this, VIEW_W / 2, VIEW_H / 2 + 34, '', { color: 0xfee761 }).setVisible(false);
     text(this, VIEW_W / 2, VIEW_H - 24, `${keyName(settings.bindings.talk)}: FRASES`, { color: UI.muted }).setAlpha(0.7);
     this.flash = this.add.rectangle(0, 0, VIEW_W, VIEW_H, 0xe43b44, 0).setOrigin(0);
 
@@ -246,8 +248,9 @@ export class UIScene extends Phaser.Scene {
     this.timer.setTint(urgent ? (Math.floor(this.t * 4) % 2 ? 0xe43b44 : 0xffffff) : UI.text);
 
     const escs = model.chars.filter((c) => !c.isChaser);
-    const alive = escs.filter((c) => c.alive).length;
-    this.aliveText.setText(fontText(`ESCAPISTAS ${alive}/${escs.length}`));
+    const alive = escs.filter((c) => c.free).length;
+    const trappedN = escs.filter((c) => c.trapped > 0).length;
+    this.aliveText.setText(fontText(`LIBRES ${alive}/${escs.length}${trappedN ? ` · ATRAPADOS ${trappedN}` : ''}`));
 
     const d = this.dyn;
     d.clear();
@@ -258,7 +261,16 @@ export class UIScene extends Phaser.Scene {
       const x = Math.round(startX + i * 7);
       const y = 40;
       d.fillStyle(0x0d0b14, 1).fillRect(x - 3, y - 3, 6, 6);
-      d.fillStyle(c.alive ? (c.id === model.playerId ? 0xfee761 : TEAM_COLORS.escapist.main) : 0x3a4466, 1).fillRect(x - 2, y - 2, 4, 4);
+      const col = !c.alive
+        ? 0x3a4466
+        : c.trapped > 0
+          ? Math.floor(this.t * 4) % 2
+            ? 0xfeae34
+            : 0x8a5a20
+          : c.id === model.playerId
+            ? 0xfee761
+            : TEAM_COLORS.escapist.main;
+      d.fillStyle(col, 1).fillRect(x - 2, y - 2, 4, 4);
     });
 
     // fila 2 y barras
@@ -311,6 +323,11 @@ export class UIScene extends Phaser.Scene {
     }
 
     this.ghostHint.setVisible(!p.alive && model.state === 'play');
+    this.trapHint.setVisible(p.trapped > 0 && model.state === 'play');
+    if (p.trapped > 0)
+      this.trapHint.setText(
+        fontText(p.rescueProg > 0 ? `¡TE ESTÁN RESCATANDO! ${Math.round(p.rescueProg * 100)}%` : `ENJAMONADO · ${Math.ceil(p.trapped)} S PARA QUE TE RESCATEN`),
+      );
     this.hiddenHint.setVisible(p.alive && p.inBush && model.state === 'play');
 
     this.drawMinimap();
@@ -410,7 +427,7 @@ export class UIScene extends Phaser.Scene {
       if (!c.alive || c.id === viewer.id) continue;
       if (c.team !== viewer.team && c.inBush && Math.hypot(c.x - viewer.x, c.y - viewer.y) > BALANCE.terrain.bushRevealDistance) continue;
       g.fillStyle(0x0d0b14, 1).fillRect(Math.round(c.x * k) - 2, Math.round(c.y * k) - 2, 4, 4);
-      g.fillStyle(c.isChaser ? TEAM_COLORS.chaser.light : TEAM_COLORS.escapist.main, 1).fillRect(Math.round(c.x * k) - 1, Math.round(c.y * k) - 1, 2, 2);
+      g.fillStyle(c.isChaser ? TEAM_COLORS.chaser.light : c.trapped > 0 ? 0xfeae34 : TEAM_COLORS.escapist.main, 1).fillRect(Math.round(c.x * k) - 1, Math.round(c.y * k) - 1, 2, 2);
     }
     if (Math.floor(this.t * 4) % 2 === 0 || !viewer.alive) {
       g.fillStyle(0x0d0b14, 1).fillRect(Math.round(viewer.x * k) - 2, Math.round(viewer.y * k) - 2, 5, 5);

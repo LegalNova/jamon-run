@@ -12,9 +12,17 @@
  *   H  cabaña (sólido, rectángulos)
  *   X  salida de perseguidores        E  salida preferente de escapistas (opcional)
  *   o  punto de aparición de objetos
+ *
+ * Ciudades
+ *   ,  césped / monte                 s  arena de playa
+ *   c  terraza de café (sólido)       M  boca de metro (te lleva a la siguiente)
+ *   L  Torre Eiffel (sólido)          P  Pirámide del Louvre (sólido)
+ *   S  Sagrada Família (sólido)       g  banco de trencadís (sólido)
+ *   k  carril bici (acelera)          W  casas blancas (sólido)
+ *   C  Hércules de Ceuta (sólido)
  */
 
-export type BiomeId = 'forest' | 'desert' | 'snow';
+export type BiomeId = 'forest' | 'desert' | 'snow' | 'paris' | 'barcelona' | 'ceuta';
 
 export interface MapDef {
   id: BiomeId;
@@ -22,6 +30,8 @@ export interface MapDef {
   subtitle: string;
   description: string[];
   rows: string[];
+  /** Mapas de ciudad (extras). */
+  city?: boolean;
 }
 
 const wrap = (inner: string[]): string[] => {
@@ -137,6 +147,117 @@ export const MAPS: MapDef[] = [
       '...nn............iii..........o........TT.....',
       '...nn.........T..........nn.........T.........',
       'T..........TT.............nn.................T',
+    ]),
+  },
+  {
+    id: 'paris',
+    name: 'PARÍS',
+    subtitle: 'Torre Eiffel y el Sena',
+    description: ['El Sena con tres puentes.', 'Las bocas de metro te', 'llevan a otra punta.'],
+    city: true,
+    rows: wrap([
+      'T............................................T',
+      '..#####..#####...T..........T...#####..#####..',
+      '..#####..#####..................#####..#####..',
+      '..#####..#####.o.....PPP........#####..#####..',
+      '........c.c..........PPP..............c...o...',
+      '....o...........T....PPP.....T.c..............',
+      '..#####..####....................####..#####..',
+      '..#####..####.....bb......bb.....####..#####..',
+      '..#####..####.c...............o..####..#####..',
+      '..#####......M...T..........T..........#####..',
+      '......................XX..........M..c........',
+      '..............................................',
+      '~~~~~==~~~~~~~~................~~~~~==~~~~~~~~',
+      '~~~~~==~~~~~~~~~~~~~==~~~~~~~~~~~~~~==~~~~~~~~',
+      '~~~~~==~~~~~~~~~~~~~==~~~~~~~~~~~~~~==~~~~~~~~',
+      '...............~~~~~==~~~~~~~~~...............',
+      '.......o..............XX......................',
+      '...........M..T,,,,,,,,,,,,,,,,T........o.....',
+      '..#####.####..,,,,,,,,,,,,,,,,,,....####......',
+      '..#####.####..T,,,,,,LLLL,,,,,,T....####......',
+      '..#####.####..,,,,,,,LLLL,,,,,,,....####.c....',
+      '..............T,,,,,,LLLL,,,,,,T..............',
+      '.........c....,,,,,,,,,,,,,,,,,,....M.........',
+      '..#####.......T,,,,,,,,,,o,,,,,T.####..#####..',
+      '..#####.......,,,bb,,,,,,,,bb,,,.####..#####..',
+      '..#####.....o.T,,,,,,,bb,,,,,,,T.####..#####..',
+      '..............,,,,,,,,,,,,,,,,,,..............',
+      'T............................................T',
+    ]),
+  },
+  {
+    id: 'barcelona',
+    name: 'BARCELONA',
+    subtitle: 'Sagrada Família y playa',
+    description: ['Manzanas con chaflán,', 'trencadís de Gaudí y', 'carriles bici que aceleran.'],
+    city: true,
+    rows: wrap([
+      'T..................................k.........T',
+      '..####....####...T........T...####.k..####....',
+      '.######..######....SSSSSS....######k.######...',
+      '.######..######....SSSSSS....######k.######...',
+      '..####....####.....SSSSSS.....####.k..####....',
+      '...................SSSSSS.......o..k..........',
+      '....o........o...T........T........k.....o....',
+      '..####....####................####.k..####....',
+      '.######..######...bb.........######k.######...',
+      '.######..######..g..gg..gg...######k.######...',
+      '..####....####....gg..gg..g...####.k..####....',
+      '........................bb.........k..........',
+      'kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk',
+      '..####..k......T...T...............k..####....',
+      '.######.k.................#####....k.######...',
+      '.######.k......T...T.XX..#######...k.######...',
+      '..####..k.................#####....k..####....',
+      '........k......T...T.XX............k..........',
+      '........k.o.................gg.....k..........',
+      '........k......T...T...............k...o......',
+      '........k..........................k..........',
+      'ssssssssssssssssssssssssssssssssssssssssssssss',
+      'ssssTsssssssTsssssssTssossssTsssssssTsssssTsss',
+      'sssssssssssssssssssssssssssssssssbssssssssssss',
+      'sssssssssbsssssssssssssssbssssosssssssssssssss',
+      'ssssssssssssssssssssssssssssssssssssssssssssss',
+      '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+      '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+    ]),
+  },
+  {
+    id: 'ceuta',
+    name: 'CEUTA',
+    subtitle: 'Murallas Reales y foso',
+    description: ['El foso de San Felipe y', 'el monte Hacho. Ojo con', 'las ráfagas de levante.'],
+    city: true,
+    rows: wrap([
+      'T.................###~~~~###.................T',
+      '.WWWW..WWWWW.WWW..###~~~~###.,,,,,,,,,,,,,,,,.',
+      '.WWWW..WWWWW.WWW..###~~~~###.,,,,,T,,,,,,,,,,.',
+      '.WWWW..WWWWW.WWW..###~~~~###.,,T,,,,,,,,,,T,,.',
+      '..................###~~~~###.,,,,o,,,,T,,,,,,.',
+      '.....................====....,,,,,,,,rr,,,,,,.',
+      '...o.......o.........====....,,,,,,,,,,,,r,,,.',
+      '..................###~~~~###.,,,,,,,T,,,,,,,,.',
+      '.WWWW.T...T..WWW..###~~~~###.,,,T,,,,,,,,,,,,.',
+      '.WWWW..CC....WWW..###~~~~###.,,,,,,,,,,,T,,,,.',
+      '.WWWW..CC....WWW..###~~~~###.,,,,r,,,,,,,,,,,.',
+      '.WWWW.............###~~~~###.,,,,,,T,,,bbb,T,.',
+      '......T...T.......###~~~~###.,T,,,,,,,,,,,,,,.',
+      '...............o.....====....,,,,,,,,,,,,,,,,.',
+      '.......bbb...........====.........XX.....o....',
+      '..................###~~~~###..................',
+      '.WWWW.......WWWW..###~~~~###..WWWW...WWWWW....',
+      '.WWWW.......WWWW..###~~~~###..WWWW...WWWWW....',
+      '.WWWW....XX.WWWW..###~~~~###..WWWW...WWWWW....',
+      '..................###~~~~###.T.....T..........',
+      '.....ro...........###~~~~###........r..o......',
+      '.....................====.....................',
+      'ssssssssssssssssss...====...ssssssssssssssssss',
+      'sssTsssssTssssTsss###~~~~###sssTsssssTssssTsss',
+      'ssssssssssssosssss###~~~~###ssssssssssssssssss',
+      'ssssssssssssssssss###~~~~###ssssssssssssssssss',
+      '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+      '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
     ]),
   },
 ];

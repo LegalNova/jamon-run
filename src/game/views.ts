@@ -7,12 +7,14 @@ export const PICKUP_NAMES: Record<PickupType, string> = {
   medkit: 'BOTIQUÍN',
   boot: 'BOTA VELOZ',
   shield: 'ESCUDO',
+  gold: 'JAMÓN DE ORO',
 };
 
 export const PICKUP_COLORS: Record<PickupType, number> = {
   medkit: 0xff6b6b,
   boot: 0xfee761,
   shield: 0x7cc8ff,
+  gold: 0xffd23f,
 };
 
 /** Objeto en el suelo que flota y parpadea antes de desaparecer. */

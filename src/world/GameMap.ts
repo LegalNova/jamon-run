@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { TILE } from '../config/balance';
 import { clampToMap, moveCircle, resolveCircle } from '../../shared/collision';
 import { buildCabin, buildMiniTexture, GroundRenderer } from '../gfx/tiles';
+import { buildLandmark } from '../gfx/cityTiles';
 import { Grid, Terrain } from './grid';
 import { BiomeId } from './maps';
 
@@ -45,7 +46,14 @@ export class GameMap {
         const c = g.charAt(tx, ty);
         const v = (tx * 7 + ty * 13) % 2;
         if (c === 'T') {
-          const key = this.id === 'forest' ? `tree${v}` : this.id === 'desert' ? `cactus${v}` : `pine${v}`;
+          const key =
+            this.id === 'forest' || this.id === 'paris'
+              ? `tree${v}`
+              : this.id === 'desert'
+                ? `cactus${v}`
+                : this.id === 'snow'
+                  ? `pine${v}`
+                  : `palm${v}`;
           const yOff = this.id === 'desert' ? 2 : 2;
           this.scene.add
             .image(tx * TILE + TILE / 2, (ty + 1) * TILE + yOff, key)
@@ -58,6 +66,21 @@ export class GameMap {
             .setAlpha(0.95);
           if ((tx + ty) % 2) img.setFlipX(true);
           this.bushes.set(ty * g.w + tx, img);
+        } else if (c === 'M') {
+          this.scene.add.image(tx * TILE + 3, (ty + 1) * TILE - 4, 'metro_sign').setOrigin(0.5, 1).setDepth((ty + 1) * TILE - 4);
+        } else if ('LPSC'.includes(c) && !seen[ty * g.w + tx]) {
+          // monumento: rectángulo de tiles con un sprite grande encima
+          let w = 0;
+          while (g.charAt(tx + w, ty) === c) w++;
+          let h = 0;
+          while ([...Array(w).keys()].every((i) => g.charAt(tx + i, ty + h) === c)) h++;
+          for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) seen[(ty + j) * g.w + tx + i] = 1;
+          const key = `landmark_${c}_${w}x${h}`;
+          buildLandmark(this.scene, key, c, w, h);
+          this.scene.add
+            .image(tx * TILE + (w * TILE) / 2, (ty + h) * TILE + 1, key)
+            .setOrigin(0.5, 1)
+            .setDepth((ty + h) * TILE - 2);
         } else if (c === 'H' && !seen[ty * g.w + tx]) {
           // rectángulo de cabaña
           let w = 0;

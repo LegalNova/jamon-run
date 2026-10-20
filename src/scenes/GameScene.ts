@@ -163,6 +163,12 @@ export class GameScene extends Phaser.Scene {
         ? { x: { min: -20, max: 1000 }, y: -6, lifespan: 6000, speedY: { min: 14, max: 30 }, speedX: { min: -10, max: 6 }, scale: { min: 1, max: 2 }, alpha: { min: 0.6, max: 1 }, frequency: 50, tint: 0xffffff }
         : id === 'desert'
           ? { x: -10, y: { min: 0, max: 600 }, lifespan: 4500, speedX: { min: 50, max: 90 }, speedY: { min: -6, max: 6 }, scale: { min: 1, max: 2 }, alpha: { start: 0.55, end: 0 }, frequency: 90, tint: 0xfff1c4 }
+          : id === 'paris'
+            ? { x: { min: -20, max: 1000 }, y: -6, lifespan: 1400, speedY: { min: 220, max: 300 }, speedX: { min: -30, max: -20 }, scaleX: 1, scaleY: { min: 2, max: 4 }, alpha: { min: 0.25, max: 0.5 }, frequency: 25, tint: 0xb8c7e0 }
+            : id === 'barcelona'
+              ? { x: { min: 0, max: 1000 }, y: { min: 0, max: 600 }, lifespan: 2500, speedY: { min: -8, max: -2 }, scale: { start: 1.5, end: 0 }, alpha: { start: 0.8, end: 0 }, frequency: 160, tint: [0xfee761, 0xffffff] }
+              : id === 'ceuta'
+                ? { x: 1010, y: { min: 0, max: 600 }, lifespan: 5000, speedX: { min: -90, max: -50 }, speedY: { min: -4, max: 4 }, scale: { min: 1, max: 2 }, alpha: { start: 0.5, end: 0 }, frequency: 140, tint: [0xffffff, 0xdff3ff] }
           : { x: { min: 0, max: 1000 }, y: -6, lifespan: 7000, speedY: { min: 10, max: 22 }, speedX: { min: -16, max: 16 }, rotate: { min: 0, max: 360 }, scale: 1, alpha: { min: 0.7, max: 1 }, frequency: 350, tint: [0x63c74d, 0xfeae34, 0x3e8948] };
     // Sigue a la vista de la cámara (en coordenadas del mundo).
     this.ambient = this.add.particles(0, 0, id === 'forest' ? 'p_leaf' : 'p_dot', cfg).setDepth(9800);
@@ -181,7 +187,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   cycleSpectate(): void {
-    const alive = this.model.chars.filter((c) => c.alive && !c.isChaser);
+    const alive = this.model.chars.filter((c) => c.free && !c.isChaser);
     if (!alive.length) return;
     const i = this.spectate ? alive.indexOf(this.spectate) : -1;
     this.spectate = alive[(i + 1) % alive.length];
@@ -340,26 +346,87 @@ export class GameScene extends Phaser.Scene {
         fx.float(v.x, v.y - 18, '¡BLOQUEO!', 0x7cc8ff);
         break;
       }
+      case 'trap': {
+        // Pillado: queda "enjamonado" esperando a que le rescaten.
+        const v = this.charOf(e.v);
+        if (!v) break;
+        if (this.near(v.x, v.y) || e.v === me.id) {
+          audio.play('ko');
+          fx.ko(v.x, v.y - 8);
+          fx.debrisAt(v.x, v.y - 10, [0xc2414b, 0xf6dcc0, 0x7a3b22]);
+          this.shake(e.v === me.id ? 0.012 : 0.006, 220);
+        }
+        const free = m.chars.filter((c) => c.free && !c.isChaser).length;
+        if (e.v === me.id) {
+          this.events.emit('announce', '¡TE HAN ENJAMONADO!', TEAM_COLORS.escapist.light, true);
+          this.time.delayedCall(1300, () => {
+            if (m.state === 'play' && me.trapped > 0) this.events.emit('announce', 'AGUANTA: UN COMPAÑERO PUEDE RESCATARTE', 0xfee761, false);
+          });
+        } else {
+          this.events.emit('feed', `${v.name} ENJAMONADO`, e.a === me.id ? 0xfee761 : TEAM_COLORS.escapist.light);
+          if (e.a === me.id) fx.float(v.x, v.y - 26, '¡PILLADO!', 0xfee761, true);
+          else if (!me.isChaser && me.free) this.events.emit('feed', `¡RESCATA A ${v.name}!`, 0x63c74d);
+        }
+        if (free > 0) this.events.emit('feed', `QUEDAN ${free} LIBRES`, 0x8b9bb4);
+        break;
+      }
+      case 'rescue': {
+        const v = this.charOf(e.v);
+        const by = this.charOf(e.by);
+        if (!v) break;
+        if (this.near(v.x, v.y) || e.v === me.id || e.by === me.id) {
+          audio.play('heal');
+          fx.sparkle(v.x, v.y - 8, 0x63c74d);
+          fx.ring(v.x, v.y - 8, 0x63c74d, 30);
+          fx.float(v.x, v.y - 24, '¡LIBRE!', 0x63c74d, true);
+        }
+        if (e.v === me.id) this.events.emit('announce', '¡TE HAN RESCATADO!', 0x63c74d, true);
+        else if (e.by === me.id) this.events.emit('announce', '¡RESCATE!', 0x63c74d, true);
+        this.events.emit('feed', `${by?.name ?? '?'} LIBERA A ${v.name}`, 0x63c74d);
+        break;
+      }
+      case 'streak': {
+        const c = this.charOf(e.id);
+        const label = e.n === 2 ? '¡DOBLE PILLADA!' : e.n === 3 ? '¡TRIPLE PILLADA!' : `¡PILLADA X${e.n}!`;
+        audio.play('reveal');
+        this.events.emit('announce', `${label} ${c?.name ?? ''}`, TEAM_COLORS.chaser.light, true);
+        if (c) fx.ring(c.x, c.y - 8, 0xfee761, 40);
+        break;
+      }
+      case 'metro': {
+        if (this.near(e.x0, e.y0) || this.near(e.x1, e.y1)) {
+          audio.play('dash');
+          fx.smokePuff(e.x0, e.y0 - 4, 5);
+          fx.smokePuff(e.x1, e.y1 - 4, 5);
+          fx.ring(e.x1, e.y1 - 6, 0xf2c230, 22);
+        }
+        if (e.id === me.id) this.events.emit('feed', '¡METRO! APARECES EN OTRA ESTACIÓN', 0xf2c230);
+        break;
+      }
+      case 'wind':
+        if (e.on) {
+          audio.play('smoke');
+          this.events.emit('announce', e.dx < 0 ? '¡LEVANTE! EL VIENTO EMPUJA AL OESTE' : '¡PONIENTE! EL VIENTO EMPUJA AL ESTE', 0xdff3ff, false);
+          this.ambient.setFrequency(20);
+        } else this.ambient.setFrequency(140);
+        break;
       case 'ko': {
+        // Se acabó el tiempo atrapado: fuera de la partida.
         const v = this.charOf(e.v);
         if (!v) break;
         this.viewOf(e.v)?.onKo();
         if (this.near(v.x, v.y) || e.v === me.id) {
-          audio.play('ko');
+          audio.play('lose');
           fx.ko(v.x, v.y - 8);
-          this.shake(e.v === me.id ? 0.012 : 0.006, 220);
         }
-        const alive = m.chars.filter((c) => c.alive && !c.isChaser).length;
+        const free = m.chars.filter((c) => c.free && !c.isChaser).length;
         if (e.v === me.id) {
-          this.events.emit('announce', '¡TE HAN PILLADO!', TEAM_COLORS.escapist.light, true);
+          this.events.emit('announce', 'NADIE LLEGÓ... ERES UN FANTASMA', 0xc2c3c7, true);
           this.time.delayedCall(1400, () => {
-            if (m.state === 'play') this.events.emit('announce', 'ERES UN FANTASMA: MUÉVETE O CAMBIA DE CÁMARA', 0xc2c3c7, false);
+            if (m.state === 'play') this.events.emit('announce', 'MUÉVETE O CAMBIA DE CÁMARA', 0xc2c3c7, false);
           });
-        } else {
-          this.events.emit('feed', `${v.name} ELIMINADO`, e.a === me.id ? 0xfee761 : TEAM_COLORS.escapist.light);
-          if (e.a === me.id) fx.float(v.x, v.y - 26, '¡PILLADO!', 0xfee761, true);
-        }
-        if (alive > 0) this.events.emit('feed', `QUEDAN ${alive}`, 0x8b9bb4);
+        } else this.events.emit('feed', `${v.name} FUERA`, 0x8b9bb4);
+        if (free > 0) this.events.emit('feed', `QUEDAN ${free} LIBRES`, 0x8b9bb4);
         break;
       }
       case 'dash': {
@@ -402,6 +469,10 @@ export class GameScene extends Phaser.Scene {
           if (c) fx.float(c.x, c.y - 18, `+${BALANCE.items.medkitHeal}`, 0x63c74d);
         } else if (this.near(e.x, e.y)) audio.play('pickup');
         if (e.id === me.id) this.events.emit('feed', `¡${PICKUP_NAMES[e.type]}!`, PICKUP_COLORS[e.type]);
+        if (e.type === 'gold') {
+          audio.play('win');
+          this.events.emit('announce', `¡JAMÓN DE ORO! ${c?.name ?? ''} LIBERA A TODOS`, 0xffd23f, true);
+        }
         break;
       }
       case 'say': {

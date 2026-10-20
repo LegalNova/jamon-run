@@ -78,7 +78,7 @@ Electron no está entre las dependencias del proyecto: estos comandos lo bajan c
 
 1. **Elige mapa** (contra bots) o entra en una **sala online**.
 2. **La ruleta muestra tu bando** (al azar).
-   - **Equipo ROJO (escapistas):** chándal rojo, gorra «GUCHI», cadena dorada, riñonera y zapatillas blancas. Sobrevive hasta que acabe el tiempo: tu equipo gana si queda al menos uno vivo.
+   - **Equipo ROJO (escapistas):** chándal oscuro con monograma de doble G y raya verde-roja-verde (parodia «GUCHI», no es el logo real), gorra roja, cadena dorada gorda, pendiente, riñonera y zapatillas blancas. Sobrevive hasta que acabe el tiempo y rescata a tus compañeros enjamonados: tu equipo gana si queda al menos uno libre.
    - **Equipo AZUL (perseguidores):** uniforme azul y pata de jamón. Pilla a todos los rojos antes de que acabe el tiempo.
 3. Los rojos tienen 100 de vida. Cada jamonazo quita 25 y los empuja. Al llegar a 0 quedan eliminados y se convierten en fantasma: pueden volar por el mapa o seguir con la cámara a los que siguen vivos.
 
@@ -104,7 +104,7 @@ Las teclas se pueden reasignar en **Controles**. Las flechas siempre sirven para
 
 ### Frases y voces
 
-Los personajes sueltan frases en bocadillos según lo que pasa: «¡Píllalo!», «¡A por él!», «¡Jamonazo!», «¡Te pillé!», «¡Socorro!», «¡Ni me tocas!», «¡Mi gorra no!»… Con **T** abres la rueda de frases rápidas (eliges con 1–8 o con el ratón). Se oyen con la voz sintetizada del navegador, con un tono distinto para cada equipo; se pueden quitar en **Opciones → Voces**. Online, todos ven y oyen las frases de todos.
+Los personajes sueltan frases en bocadillos según lo que pasa: «¡Alto ahí, figura!», «¡Ven aquí, que te loncheo!», «¡Ese chándal es de mercadillo!», «¡Vigilad al enjamonado!», «¡Ni me tocas, pringao!», «¡Mi gorra no, que es original!», «¡Rescatadme, porfa!», «¡Gracias, crack!»… Con **T** abres la rueda de frases rápidas (eliges con 1–8 o con el ratón). Se oyen con la voz sintetizada del navegador, con un tono distinto para cada equipo; se pueden quitar en **Opciones → Voces**. Online, todos ven y oyen las frases de todos.
 
 ### Habilidades
 
@@ -125,11 +125,23 @@ Los personajes sueltan frases en bocadillos según lo que pasa: «¡Píllalo!»,
 | Bota veloz | +40% de velocidad durante 5 s | Todos |
 | Escudo | Bloquea un golpe | Rojos |
 
-### Biomas
+### Rescates (como en «polis y cacos»)
 
+Cuando a un rojo le quitan toda la vida no queda fuera de golpe: lo **enjamonan** (se queda en una jaula de jamón) durante 12 segundos. Si un compañero se queda **a su lado 1,6 s**, lo libera con media vida. Si nadie llega a tiempo, queda fuera y pasa a ser fantasma. Los azules ganan si en algún momento no queda **ningún rojo libre**, así que les toca vigilar a los atrapados. Los azules que pillan a varios seguidos se llevan un «¡DOBLE PILLADA!».
+
+El **jamón de oro** (un objeto que aparece de vez en cuando) libera de golpe a todos los rojos atrapados.
+
+### Mapas
+
+Clásicos:
 - **Bosque:** arbustos que te esconden y un río con varios puentes.
 - **Desierto:** ruinas con pasillos estrechos y arenas movedizas que frenan mucho.
 - **Nieve:** un lago de hielo donde resbalas, nieve profunda, cabañas y montones de nieve.
+
+Ciudades:
+- **París:** la Torre Eiffel en el Campo de Marte, el Sena con tres puentes, la pirámide del Louvre, tejados de zinc, terrazas de café y **bocas de metro** (Guimard): si entras en una, apareces en la siguiente estación.
+- **Barcelona:** la Sagrada Família (con su grúa), manzanas del Eixample con chaflán, suelo de panot, bancos de trencadís, palmeras, la playa de la Barceloneta y **carriles bici** que te aceleran.
+- **Ceuta:** las Murallas Reales con el foso de San Felipe y sus puentes, el Hércules entre las columnas, casas blancas, el monte Hacho y la playa. Cada cierto tiempo sopla el **levante** y empuja a todos hacia el oeste.
 
 Con más personajes, el mapa crece repitiéndose en espejo: 48×30 tiles hasta 9 personajes, 94×30 hasta 15 y 94×58 hasta 20.
 
@@ -156,6 +168,8 @@ Todos los números están en **`shared/balance.ts`**. Lo usan el cliente y el se
 | `ai.easy` / `ai.normal` / `ai.hard` | reacción, puntería, velocidad y valentía de los bots |
 | `NET` | tick del servidor (20 Hz), entradas por segundo (15), máximo de jugadores (20), reconexión (15 s), retraso de interpolación, proporción de equipos, opciones de relleno con bots |
 | `MAP_SCALE` | cuándo crece el mapa según los jugadores |
+| `RESCUE` | segundos atrapado, tiempo y distancia para rescatar, vida al volver |
+| `CITY` | enfriamiento del metro, velocidad del carril bici, fuerza y frecuencia del levante, ventana de rachas |
 | `PHRASES` / `VOICE` | frases de los bocadillos y de la rueda, probabilidades, tono y velocidad de la voz por equipo |
 
 ### Pruebas útiles

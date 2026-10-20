@@ -10,6 +10,10 @@ export enum Terrain {
   Quicksand = 5,
   Ice = 6,
   DeepSnow = 7,
+  /** Boca de metro: te lleva a la siguiente. */
+  Metro = 8,
+  /** Carril bici: acelera. */
+  Lane = 9,
 }
 
 const CHAR_TERRAIN: Record<string, Terrain> = {
@@ -30,6 +34,16 @@ const CHAR_TERRAIN: Record<string, Terrain> = {
   q: Terrain.Quicksand,
   i: Terrain.Ice,
   d: Terrain.DeepSnow,
+  s: Terrain.Ground,
+  c: Terrain.Solid,
+  L: Terrain.Solid,
+  P: Terrain.Solid,
+  S: Terrain.Solid,
+  g: Terrain.Solid,
+  W: Terrain.Solid,
+  C: Terrain.Solid,
+  M: Terrain.Metro,
+  k: Terrain.Lane,
 };
 
 const MOVE_COST: Record<number, number> = {
@@ -39,7 +53,14 @@ const MOVE_COST: Record<number, number> = {
   [Terrain.Quicksand]: 2.6,
   [Terrain.Ice]: 1.5,
   [Terrain.DeepSnow]: 1.5,
+  [Terrain.Metro]: 1,
+  [Terrain.Lane]: 0.8,
 };
+
+/** Tiles que tapan la vista (los arbustos, el agua y las terrazas no). */
+export const SIGHT_BLOCKERS = '#TRHnLPSWC';
+/** Tiles que paran un jamón lanzado. */
+export const SHOT_BLOCKERS = '#TRHnrLPSWCcg';
 
 const DIRS = [
   [1, 0, 1],
@@ -115,6 +136,7 @@ export class Grid {
   readonly chaserSpawns: number[] = [];
   readonly escapistSpawns: number[] = [];
   readonly itemSpawns: number[] = [];
+  readonly metroTiles: number[] = [];
 
   constructor(rows: string[]) {
     this.h = rows.length;
@@ -131,6 +153,7 @@ export class Grid {
         if (c === 'X') this.chaserSpawns.push(i);
         if (c === 'E') this.escapistSpawns.push(i);
         if (c === 'o') this.itemSpawns.push(i);
+        if (c === 'M') this.metroTiles.push(i);
       }
     }
     this.openness = new Float32Array(this.w * this.h);
@@ -186,7 +209,7 @@ export class Grid {
   blocksSight(tx: number, ty: number): boolean {
     if (!this.inBounds(tx, ty)) return true;
     const c = this.chars[ty][tx];
-    return c === '#' || c === 'T' || c === 'R' || c === 'H' || c === 'n';
+    return SIGHT_BLOCKERS.includes(c);
   }
 
   tileCenter(i: number): { x: number; y: number } {

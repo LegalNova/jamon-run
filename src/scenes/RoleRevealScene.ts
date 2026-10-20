@@ -153,8 +153,8 @@ export class RoleRevealScene extends Phaser.Scene {
       this.tweens.add({ targets: ham, rotation: 0.6, yoyo: true, repeat: -1, duration: 260, ease: 'Sine.easeInOut', repeatDelay: 400 });
     }
     const goal = chaser
-      ? ['PILLA A TODOS LOS ROJOS', 'ANTES DE QUE ACABE EL TIEMPO.']
-      : ['SOBREVIVE HASTA QUE ACABE', 'EL TIEMPO. ¡QUE NO TE PILLEN!'];
+      ? ['ENJAMONA A TODOS LOS ROJOS', 'Y VIGILA A LOS ATRAPADOS.']
+      : ['SOBREVIVE Y RESCATA A TUS', 'COLEGAS ENJAMONADOS.'];
     goal.forEach((l, i) => text(this, cx, 148 + i * 11, l, { color: UI.text }));
     const b = settings.bindings;
     const lines = chaser

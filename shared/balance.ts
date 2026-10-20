@@ -121,7 +121,7 @@ export const BALANCE = {
     bootDuration: 5,
     bootMultiplier: 1.4,
     /** Probabilidades relativas de cada objeto. */
-    weights: { medkit: 4, boot: 3, shield: 3 },
+    weights: { medkit: 4, boot: 3, shield: 3, gold: 1 },
     /** Tiempo que dura un objeto en el suelo antes de desaparecer. */
     lifetime: 25,
   },
@@ -200,30 +200,39 @@ export const MAP_SCALE: { maxPlayers: number; sx: number; sy: number }[] = [
 /** Frases de los bocadillos (y de la voz). Se envían por la red por su índice. */
 export const PHRASES = {
   list: [
-    '¡Píllalo!', // 0  azul
-    '¡A por él!', // 1  azul
-    '¡Jamonazo!', // 2  azul
-    '¡Te pillé!', // 3  azul
-    '¡Socorro!', // 4  rojo
-    '¡Ni me tocas!', // 5  rojo
-    '¡Mi gorra no!', // 6  rojo
-    '¡Hola!', // 7
-    '¡Por aquí!', // 8
+    '¡Alto ahí, figura!', // 0  azul
+    '¡Ven aquí, que te loncheo!', // 1  azul
+    '¡Jamonazo de bellota!', // 2  azul
+    '¡Pillado y loncheado!', // 3  azul
+    '¡Socorro, que me lonchean!', // 4  rojo
+    '¡Ni me tocas, pringao!', // 5  rojo
+    '¡Mi gorra no, que es original!', // 6  rojo
+    '¡Hola, hola!', // 7
+    '¡Por aquí, primo!', // 8
     '¡Cuidado!', // 9
-    '¡Gracias!', // 10
-    '¡Jajaja!', // 11
-    '¡Vamos!', // 12
+    '¡Gracias, crack!', // 10
+    '¡Jajajaja!', // 11
+    '¡Vamos, vamos!', // 12
     '¡Buena partida!', // 13
+    '¡Ese chándal es de mercadillo!', // 14 azul
+    '¡No corras, que es peor!', // 15 azul
+    '¡Rodeadlo!', // 16 azul
+    '¡Vigilad al enjamonado!', // 17 azul
+    '¡Rescatadme, porfa!', // 18 rojo
+    '¡Voy a por ti, aguanta!', // 19 rojo
+    '¡Libre otra vez!', // 20 rojo
+    '¡Que no me pillas, que no!', // 21 rojo
+    '¡Jamón de oro, chavales!', // 22 rojo
   ],
   /** Rueda de frases rápidas (tecla T): 8 por equipo. */
   wheel: {
-    chaser: [0, 1, 2, 3, 8, 9, 12, 13],
-    escapist: [4, 5, 6, 8, 9, 10, 11, 13],
+    chaser: [0, 1, 2, 14, 15, 16, 17, 13],
+    escapist: [5, 6, 18, 19, 21, 8, 10, 11],
   },
   /** Segundos mínimos entre dos frases del mismo personaje. */
   cooldown: 3,
   /** Probabilidad de decir algo en cada situación. */
-  chance: { hit: 0.5, ko: 0.9, dodge: 0.7, release: 0.5, chase: 0.04 },
+  chance: { hit: 0.5, ko: 0.9, dodge: 0.7, release: 0.5, chase: 0.05, rescue: 0.9 },
   bubbleSeconds: 2.2,
 } as const;
 
@@ -237,4 +246,36 @@ export const VOICE = {
   cooldown: 1.2,
   /** Solo se oyen los personajes a esta distancia (px) o menos. */
   hearDistance: 260,
+} as const;
+
+/**
+ * Rescate (como en "polis y cacos"): al rojo que pillan lo "enjamonan" unos segundos.
+ * Si un compañero se queda a su lado lo libera; si nadie llega a tiempo, queda fuera.
+ */
+export const RESCUE = {
+  enabled: true,
+  /** Segundos atrapado antes de quedar fuera de la partida. */
+  trapSeconds: 12,
+  /** Segundos que hay que estar al lado para liberarlo. */
+  rescueTime: 1.6,
+  /** Distancia (px) a la que se puede rescatar. */
+  radius: 20,
+  /** Vida con la que vuelve. */
+  reviveHp: 50,
+  /** Invulnerabilidad al volver (s). */
+  reviveInvuln: 1.5,
+  /** Lo que baja la barra de rescate por segundo si nadie ayuda. */
+  decay: 0.5,
+} as const;
+
+/** Mecánicas especiales de los mapas de ciudad y anuncios. */
+export const CITY = {
+  /** París: segundos antes de poder volver a usar el metro. */
+  metroCooldown: 3,
+  /** Barcelona: multiplicador de velocidad en el carril bici. */
+  laneMultiplier: 1.35,
+  /** Ceuta: ráfagas de levante que empujan a todos hacia el oeste. */
+  levante: { firstAt: 14, interval: 22, duration: 4.5, force: 42 },
+  /** Ventana (s) para encadenar pilladas ("¡DOBLE PILLADA!"). */
+  streakWindow: 7,
 } as const;
