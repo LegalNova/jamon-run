@@ -1,0 +1,69 @@
+import Phaser from 'phaser';
+import { saveSettings, settings } from './config/settings';
+import { input } from './core/input';
+import { BootScene } from './scenes/BootScene';
+import { CharacterScene } from './scenes/CharacterScene';
+import { ByeScene } from './scenes/ByeScene';
+import { toggleFullscreen } from './scenes/common';
+import { ControlsScene } from './scenes/ControlsScene';
+import { CreditsScene } from './scenes/CreditsScene';
+import { GameScene } from './scenes/GameScene';
+import { MapSelectScene } from './scenes/MapSelectScene';
+import { MenuScene } from './scenes/MenuScene';
+import { OptionsScene } from './scenes/OptionsScene';
+import { PauseScene } from './scenes/PauseScene';
+import { ResultsScene } from './scenes/ResultsScene';
+import { RoleRevealScene } from './scenes/RoleRevealScene';
+import { TitleScene } from './scenes/TitleScene';
+import { UIScene } from './scenes/UIScene';
+
+const game = new Phaser.Game({
+  type: Phaser.AUTO,
+  parent: 'game',
+  width: window.innerWidth,
+  height: window.innerHeight,
+  backgroundColor: '#0d0b14',
+  pixelArt: true,
+  roundPixels: true,
+  // El lienzo ocupa toda la ventana; cada escena usa un zoom de cámara entero (ver scenes/common.ts).
+  scale: {
+    mode: Phaser.Scale.RESIZE,
+    width: '100%',
+    height: '100%',
+  },
+  audio: { noAudio: true },
+  input: { keyboard: false, gamepad: false },
+  fps: { target: 60, smoothStep: true },
+  disableContextMenu: true,
+  banner: false,
+  scene: [
+    BootScene,
+    TitleScene,
+    MenuScene,
+    MapSelectScene,
+    RoleRevealScene,
+    GameScene,
+    UIScene,
+    PauseScene,
+    OptionsScene,
+    ControlsScene,
+    CreditsScene,
+    ResultsScene,
+    ByeScene,
+    CharacterScene,
+  ],
+});
+
+input.attach(game);
+
+document.addEventListener('fullscreenchange', () => {
+  settings.fullscreen = !!document.fullscreenElement;
+  saveSettings();
+});
+
+// Tecla F: pantalla completa (salvo mientras se escribe un nombre o se reasigna una tecla).
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'KeyF' && !e.repeat && !input.isTyping() && !input.isCapturing()) toggleFullscreen();
+});
+
+(window as unknown as { __JAMON__: Phaser.Game }).__JAMON__ = game;
