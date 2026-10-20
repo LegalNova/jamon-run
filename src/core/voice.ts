@@ -8,13 +8,16 @@ import { settings } from '../config/settings';
  */
 class Voice {
   private last = 0;
-  private spanish: SpeechSynthesisVoice | null = null;
+  /** Una voz por equipo (si el sistema tiene varias en español). */
+  private voices: Record<Team, SpeechSynthesisVoice | null> = { chaser: null, escapist: null };
 
   constructor() {
     if (!this.supported) return;
     const pick = () => {
-      const voices = speechSynthesis.getVoices();
-      this.spanish = voices.find((v) => v.lang === 'es-ES') ?? voices.find((v) => v.lang.startsWith('es')) ?? null;
+      const all = speechSynthesis.getVoices();
+      const es = all.filter((v) => v.lang === 'es-ES');
+      const list = es.length ? es : all.filter((v) => v.lang.startsWith('es'));
+      this.voices = { chaser: list[0] ?? null, escapist: list[1] ?? list[0] ?? null };
     };
     pick();
     speechSynthesis.addEventListener?.('voiceschanged', pick);
@@ -37,7 +40,8 @@ class Voice {
       if (speechSynthesis.speaking) speechSynthesis.cancel();
       const u = new SpeechSynthesisUtterance(text);
       u.lang = VOICE.lang;
-      if (this.spanish) u.voice = this.spanish;
+      const v = this.voices[team];
+      if (v) u.voice = v;
       u.pitch = VOICE.pitch[team];
       u.rate = VOICE.rate[team];
       const near = own ? 1 : Math.max(0.25, 1 - distance / VOICE.hearDistance);
