@@ -4,7 +4,7 @@ Pilla-pilla por equipos en vista cenital, en pixel art. El **equipo AZUL** persi
 
 Todo se genera por código: sprites, tiles, fuente, partículas, efectos de sonido, música (Web Audio en estilo 8-bit) y voces (Web Speech). No hay ni un solo asset externo.
 
-**Jugar online:** https://jamon-run.TU-SUBDOMINIO.workers.dev *(se rellena al desplegar; ver «Desplegar»)*
+**Jugar online:** https://jamon-run.jamon-run.workers.dev
 
 **Tecnología:** Phaser 3.90 + TypeScript + Vite en el cliente; Cloudflare Workers + Durable Objects (plan gratuito) en el servidor. Opcionalmente, Electron para usarlo como app de escritorio.
 
