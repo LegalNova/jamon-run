@@ -8,6 +8,7 @@ import { ensureCharTexture, Team } from '../gfx/characters';
 import { hexToInt, TEAM_COLORS } from '../gfx/palette';
 import { Button, Menu, OptionRow, panel, text, UI } from '../ui/widgets';
 import { Backdrop, fadeIn, fadeTo } from './common';
+import { net } from '../net/NetClient';
 
 type Field = Exclude<keyof Look, 'name'>;
 
@@ -161,7 +162,7 @@ export class CharacterScene extends Phaser.Scene {
   private save(): void {
     if (this.typing) this.stopTyping();
     saveLook(this.look);
-    this.events.emit('saved', profile.look);
+    if (net.connected) net.setLook(profile.look); // los demás de la sala lo ven al momento
     fadeTo(this, this.backTo);
   }
 
@@ -183,6 +184,7 @@ export class CharacterScene extends Phaser.Scene {
     if (input.back()) {
       audio.play('back');
       saveLook(this.look);
+      if (net.connected) net.setLook(profile.look);
       fadeTo(this, this.backTo);
       return;
     }

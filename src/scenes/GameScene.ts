@@ -11,6 +11,7 @@ import type { SimChar } from '../../shared/sim/Char';
 import type { RosterEntry, SimEvent, Stats, Team } from '../../shared/sim/types';
 import { CharacterView } from '../game/CharacterView';
 import { GameModel, OfflineModel } from '../game/model';
+import { OnlineModel } from '../net/OnlineModel';
 import { PICKUP_COLORS, PICKUP_NAMES, PickupView, ProjectileView } from '../game/views';
 import { Fx } from '../gfx/fx';
 import { TEAM_COLORS } from '../gfx/palette';
@@ -176,7 +177,7 @@ export class GameScene extends Phaser.Scene {
     this.pickupViews.clear();
     this.projViews.clear();
     voice.stop();
-    if (!this.finished) this.model.destroy();
+    if (!this.finished) this.model?.destroy();
   }
 
   cycleSpectate(): void {
@@ -500,24 +501,40 @@ export class GameScene extends Phaser.Scene {
 
   private finish(): void {
     if (this.finished) return;
-    this.finished = true;
     const m = this.model;
-    const data: ResultsData = {
-      mapId: m.mapId,
-      role: this.player.team,
-      winner: m.winner ?? 'escapist',
-      timePlayed: m.matchTime,
-      duration: m.duration,
-      online: m.online,
-      entries: m.chars.map((c) => ({ name: c.name, team: c.team, isPlayer: c.id === m.playerId, alive: c.alive, stats: { ...c.stats }, look: c.look })),
-    };
+    let data: ResultsData;
+    if (m instanceof OnlineModel) {
+      // Online, las estadísticas las manda el servidor al acabar.
+      const r = m.results;
+      if (!r) return;
+      data = {
+        mapId: m.mapId,
+        role: this.player.team,
+        winner: r.winner,
+        timePlayed: r.timePlayed,
+        duration: r.duration,
+        online: true,
+        entries: r.entries.map((e) => ({ name: e.name, team: e.team, isPlayer: e.id === m.playerId, alive: e.alive, stats: e.stats, look: e.look })),
+      };
+    } else {
+      data = {
+        mapId: m.mapId,
+        role: this.player.team,
+        winner: m.winner ?? 'escapist',
+        timePlayed: m.matchTime,
+        duration: m.duration,
+        online: false,
+        entries: m.chars.map((c) => ({ name: c.name, team: c.team, isPlayer: c.id === m.playerId, alive: c.alive, stats: { ...c.stats }, look: c.look })),
+      };
+    }
+    this.finished = true;
     this.scene.stop('UI');
     if (this.autotest) {
       this.scene.restart({ mapId: m.mapId, role: this.data_.role });
       return;
     }
-    // Online, el modelo sigue vivo: los resultados vuelven después al lobby.
-    this.scene.start('Results', { ...data, model: m.online ? m : undefined });
+    m.destroy();
+    this.scene.start('Results', data);
   }
 
   private openPause(): void {

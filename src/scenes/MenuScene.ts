@@ -22,6 +22,7 @@ export class MenuScene extends Phaser.Scene {
     this.letters = createLogo(this, VIEW_W / 2, 36, 3);
     this.menu = new Menu();
     const items: [string, () => void][] = [
+      ['JUGAR ONLINE', () => fadeTo(this, 'Online')],
       ['JUGAR CON BOTS', () => fadeTo(this, 'MapSelect')],
       ['MI PERSONAJE', () => fadeTo(this, 'Character', { back: 'Menu' })],
       ['OPCIONES', () => fadeTo(this, 'Options', { from: 'Menu' })],
@@ -30,7 +31,7 @@ export class MenuScene extends Phaser.Scene {
       ['SALIR', () => this.quit()],
     ];
     items.forEach(([label, fn], i) => {
-      this.menu.add(new Button(this, VIEW_W / 2, 72 + i * 22, label, fn, 130, 17));
+      this.menu.add(new Button(this, VIEW_W / 2, 66 + i * 21, label, fn, 130, 17, i === 0 ? UI.green : undefined));
     });
     text(this, VIEW_W / 2, VIEW_H - 50, '↑↓ ELEGIR · ENTER ACEPTAR · F PANTALLA COMPLETA', { color: UI.muted });
     addFullscreenButton(this);

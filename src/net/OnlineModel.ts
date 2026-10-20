@@ -1,0 +1,363 @@
+import { BALANCE, NET } from '../../shared/balance';
+import { resolveCircle } from '../../shared/collision';
+import { Grid } from '../../shared/grid';
+import type { BiomeId } from '../../shared/maps';
+import { buildRows, MapScale } from '../../shared/mapScale';
+import { F, PICKUPS, ResultNet, ServerMsg, SnapshotNet, STATES } from '../../shared/protocol';
+import { PRESS_BUFFER, SimChar } from '../../shared/sim/Char';
+import { emptyIntent, HeldInput, MatchState, SimCtx, SimEvent, Team } from '../../shared/sim/types';
+import type { GameModel, PickupLike, ProjectileLike, SmokeLike } from '../game/model';
+import { net } from './NetClient';
+
+type StartMsg = Extract<ServerMsg, { t: 'start' }>;
+
+interface Snap {
+  ts: number;
+  st: MatchState;
+  tl: number;
+  mt: number;
+  c: Map<number, number[]>;
+  p: number[][];
+  j: number[][];
+  k: number[][];
+}
+
+const INPUT_INTERVAL = 1000 / NET.inputRate;
+
+/**
+ * Partida online vista desde el cliente:
+ *  - tu personaje se predice con la misma simulación (respuesta inmediata)
+ *    y se corrige suavemente con lo que dice el servidor;
+ *  - los demás se interpolan entre snapshots, ~110 ms en el pasado.
+ */
+export class OnlineModel implements GameModel {
+  readonly online = true;
+  readonly mapId: BiomeId;
+  readonly scale: MapScale;
+  readonly grid: Grid;
+  readonly duration: number;
+  readonly playerId: number;
+  readonly chars: SimChar[] = [];
+  pickups: PickupLike[] = [];
+  projectiles: ProjectileLike[] = [];
+  smokes: SmokeLike[] = [];
+  state: MatchState = 'countdown';
+  timeLeft: number;
+  matchTime = 0;
+  winner: Team | null = null;
+  results: { winner: Team; timePlayed: number; duration: number; entries: ResultNet[] } | null = null;
+  readonly roster: StartMsg['roster'];
+
+  private byId = new Map<number, SimChar>();
+  private me: SimChar;
+  private snaps: Snap[] = [];
+  private pending: { ts: number; e: SimEvent }[] = [];
+  private history: { t: number; x: number; y: number }[] = [];
+  private held: HeldInput = { mx: 0, my: 0, sprint: false };
+  private aCount = 0;
+  private bCount = 0;
+  private lastSent = { x: 0, y: 0, r: 0, a: 0, b: 0 };
+  private lastSendAt = 0;
+  private unsub: () => void;
+  private ctx: SimCtx;
+  /** (hora del snapshot - hora local de llegada), suavizado: sirve de reloj para interpolar. */
+  private snapOffset = 0;
+  private haveSnap = false;
+
+  constructor(start: StartMsg) {
+    this.mapId = start.mapId;
+    this.scale = start.scale;
+    this.duration = start.duration;
+    this.timeLeft = start.duration;
+    this.playerId = start.you;
+    this.roster = start.roster;
+    this.grid = new Grid(buildRows(start.mapId, start.scale));
+    for (const r of start.roster) {
+      const c = new SimChar({ id: r.id, team: r.team, name: r.name, look: r.look, human: r.human, x: 0, y: 0 });
+      this.chars.push(c);
+      this.byId.set(c.id, c);
+    }
+    this.me = this.byId.get(start.you)!;
+    this.me.human = true;
+    this.ctx = {
+      grid: this.grid,
+      ai: BALANCE.ai.normal,
+      matchTime: 0,
+      canMove: (c) => this.state === 'play' && (c.team !== 'chaser' || this.matchTime >= BALANCE.match.chaserReleaseDelay),
+      inSmoke: (x, y) => this.smokes.some((s) => (x - s.x) ** 2 + ((y - s.y) * 1.2) ** 2 < s.radius * s.radius),
+      emit: (e) => this.localEvents.push(e),
+      meleeHit: () => undefined,
+      throwHam: () => undefined,
+      dropSmoke: () => undefined,
+    };
+    this.unsub = net.on((msg) => this.onMsg(msg));
+  }
+
+  private localEvents: SimEvent[] = [];
+
+  get ping(): number {
+    return net.ping;
+  }
+
+  player(): SimChar {
+    return this.me;
+  }
+
+  // ------------------------------------------------------------------ red
+
+  private onMsg(msg: ServerMsg): void {
+    if (msg.t === 's') this.onSnapshot(msg.s, msg.m);
+    else if (msg.t === 'start') net.takePendingStart(); // reconexión: seguimos en esta misma partida
+    else if (msg.t === 'results') this.results = { winner: msg.winner, timePlayed: msg.timePlayed, duration: msg.duration, entries: msg.entries };
+  }
+
+  private onSnapshot(s: SnapshotNet, m?: { ac: number; dc: number; sc: number; st: number; ex: number; en: number; bt: number; el: number }): void {
+    net.hintServerTime(s.ts);
+    const sample = s.ts - performance.now();
+    if (!this.haveSnap) {
+      this.snapOffset = sample;
+      this.haveSnap = true;
+    } else {
+      // Se adapta despacio (el jitter no mueve el reloj) salvo saltos grandes.
+      const d = sample - this.snapOffset;
+      this.snapOffset += Math.abs(d) > 250 ? d : d * 0.05;
+    }
+    const c = new Map<number, number[]>();
+    for (const e of s.c) c.set(e[0], e);
+    const snap: Snap = { ts: s.ts, st: STATES[s.st] ?? 'play', tl: s.tl / 10, mt: s.mt / 10, c, p: s.p, j: s.j, k: s.k };
+    this.snaps.push(snap);
+    while (this.snaps.length > 40) this.snaps.shift();
+    for (const e of s.e) this.pending.push({ ts: s.ts, e });
+
+    // --- tu personaje: estado del servidor + corrección de la predicción
+    const mine = c.get(this.playerId);
+    if (mine) this.reconcile(mine, s.ts, m);
+  }
+
+  private reconcile(e: number[], ts: number, m?: { ac: number; dc: number; sc: number; st: number; ex: number; en: number; bt: number; el: number }): void {
+    const me = this.me;
+    const flags = e[9];
+    const wasAlive = me.alive;
+    me.alive = (flags & F.alive) !== 0;
+    me.hp = e[7];
+    me.shield = (flags & F.shield) !== 0;
+    me.stun = flags & F.stun ? Math.max(me.stun, 0.05) : Math.min(me.stun, 0);
+    me.invuln = flags & F.invuln ? Math.max(me.invuln, 0.05) : 0;
+    if (wasAlive && !me.alive) this.history = [];
+    if (m) {
+      // Cooldowns: confiamos en la predicción salvo que se aleje mucho.
+      if (Math.abs(me.attackCd - m.ac) > 0.25) me.attackCd = m.ac;
+      if (Math.abs(me.dashCd - m.dc) > 0.25) me.dashCd = m.dc;
+      if (Math.abs(me.specialCd - m.sc) > 0.25) me.specialCd = m.sc;
+      if (Math.abs(me.energy - m.en) > 10) me.energy = m.en;
+      me.exhaustTimer = m.ex;
+      me.bootTime = m.bt;
+      me.stats.eliminations = m.el;
+      if (Math.abs(me.straightTime - m.st) > 0.4) me.straightTime = m.st;
+    }
+
+    // ¿Dónde estaba yo (según mi predicción) cuando el servidor calculó esto?
+    const sx = e[1] / 10;
+    const sy = e[2] / 10;
+    const oneWay = Math.min(250, (net.ping || 100) / 2);
+    const tLocal = ts - (net.serverNow() - performance.now()) - oneWay;
+    const past = this.historyAt(tLocal);
+    if (!past) {
+      me.x = sx;
+      me.y = sy;
+      return;
+    }
+    const ex = sx - past.x;
+    const ey = sy - past.y;
+    const err = Math.hypot(ex, ey);
+    if (err > 40) {
+      // Demasiado lejos (p. ej. un empujón fuerte): saltamos a la posición buena.
+      me.x += ex;
+      me.y += ey;
+      me.kbx = 0;
+      me.kby = 0;
+      for (const h of this.history) {
+        h.x += ex;
+        h.y += ey;
+      }
+    } else if (err > 1.2) {
+      const k = 0.3;
+      me.x += ex * k;
+      me.y += ey * k;
+      for (const h of this.history) {
+        if (h.t >= tLocal) {
+          h.x += ex * k;
+          h.y += ey * k;
+        }
+      }
+    }
+    resolveCircle(this.grid, me, me.radius);
+  }
+
+  private historyAt(t: number): { x: number; y: number } | null {
+    const h = this.history;
+    if (h.length < 2 || t < h[0].t) return null;
+    for (let i = h.length - 1; i > 0; i--) {
+      if (h[i - 1].t <= t) {
+        const a = h[i - 1];
+        const b = h[i];
+        const k = b.t > a.t ? Math.min(1, (t - a.t) / (b.t - a.t)) : 0;
+        return { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k };
+      }
+    }
+    return null;
+  }
+
+  // ------------------------------------------------------------------ bucle
+
+  update(dt: number): SimEvent[] {
+    const out: SimEvent[] = [];
+    // Dibujamos a los demás un poco en el pasado respecto al último snapshot recibido.
+    const renderT = performance.now() + this.snapOffset - NET.interpolationDelayMs;
+    this.interpolate(renderT);
+    this.predict(dt, out);
+    // eventos del servidor cuando les toca (sincronizados con lo que se dibuja)
+    while (this.pending.length && this.pending[0].ts <= renderT + 30) {
+      const { e } = this.pending.shift()!;
+      // tu golpe y tu dash ya se mostraron al predecirlos
+      if ((e.t === 'swing' || e.t === 'dash') && e.id === this.playerId) continue;
+      if (e.t === 'end') this.winner = e.winner;
+      out.push(e);
+    }
+    this.sendInput();
+    return out;
+  }
+
+  private predict(dt: number, out: SimEvent[]): void {
+    const me = this.me;
+    if (!this.snaps.length) return;
+    this.ctx.matchTime = this.matchTime;
+    const it = emptyIntent();
+    it.mx = this.held.mx;
+    it.my = this.held.my;
+    it.sprint = this.held.sprint;
+    it.action = me.actionBuf > 0;
+    it.special = me.specialBuf > 0;
+    this.localEvents = [];
+    me.update(dt, this.ctx, it);
+    for (const e of this.localEvents) if (e.t === 'swing' || e.t === 'dash') out.push(e);
+    const now = performance.now();
+    this.history.push({ t: now, x: me.x, y: me.y });
+    while (this.history.length && now - this.history[0].t > 1500) this.history.shift();
+  }
+
+  private interpolate(renderT: number): void {
+    const snaps = this.snaps;
+    if (!snaps.length) return;
+    let a = snaps[0];
+    let b = snaps[0];
+    for (let i = snaps.length - 1; i >= 0; i--) {
+      if (snaps[i].ts <= renderT) {
+        a = snaps[i];
+        b = snaps[Math.min(i + 1, snaps.length - 1)];
+        break;
+      }
+    }
+    const span = b.ts - a.ts;
+    let k = span > 0 ? (renderT - a.ts) / span : 0;
+    // Si vamos por delante del último snapshot, extrapolamos un poco (máx. 100 ms).
+    let extra = 0;
+    if (a === b) {
+      extra = Math.min(0.1, Math.max(0, (renderT - a.ts) / 1000));
+      k = 0;
+    }
+    k = Math.max(0, Math.min(1, k));
+
+    this.state = a.st;
+    this.timeLeft = a.tl + (b.tl - a.tl) * k;
+    this.matchTime = a.mt + (b.mt - a.mt) * k;
+
+    for (const c of this.chars) {
+      if (c === this.me) continue;
+      const ea = a.c.get(c.id);
+      const eb = b.c.get(c.id) ?? ea;
+      if (!ea || !eb) continue;
+      const lerp = (i: number) => ea[i] + (eb[i] - ea[i]) * k;
+      c.x = lerp(1) / 10 + (extra ? (eb[3] * extra) : 0);
+      c.y = lerp(2) / 10 + (extra ? (eb[4] * extra) : 0);
+      c.vx = eb[3];
+      c.vy = eb[4];
+      const fx = eb[5] / 100;
+      const fy = eb[6] / 100;
+      if (fx || fy) {
+        c.fx = fx;
+        c.fy = fy;
+      }
+      c.hp = eb[7];
+      c.energy = eb[8];
+      const f = eb[9];
+      c.alive = (f & F.alive) !== 0;
+      c.inBush = (f & F.bush) !== 0;
+      c.shield = (f & F.shield) !== 0;
+      c.bootTime = f & F.boot ? 1 : 0;
+      c.dashTime = f & F.dash ? 0.1 : 0;
+      c.invuln = f & F.invuln ? 0.1 : 0;
+      c.sprinting = (f & F.sprint) !== 0;
+      c.stun = f & F.stun ? 0.1 : 0;
+      c.hamHidden = f & F.hamHidden ? 0.1 : 0;
+      c.human = (f & F.human) !== 0;
+      c.intent.mx = Math.sign(c.vx);
+    }
+    // primera colocación de tu personaje
+    if (this.history.length === 0 && this.me.x === 0 && this.me.y === 0) {
+      const e = a.c.get(this.playerId);
+      if (e) {
+        this.me.x = e[1] / 10;
+        this.me.y = e[2] / 10;
+      }
+    }
+
+    this.pickups = b.p.map((p) => ({ iid: p[0], type: PICKUPS[p[1]], x: p[2], y: p[3], life: p[4], dead: false }));
+    const jb = new Map(b.j.map((p) => [p[0], p]));
+    this.projectiles = a.j.map((p) => {
+      const q = jb.get(p[0]) ?? p;
+      return { pid: p[0], x: p[1] + (q[1] - p[1]) * k, y: p[2] + (q[2] - p[2]) * k, dx: p[3] / 100, dy: p[4] / 100, travelled: p[5] + (q[5] - p[5]) * k };
+    });
+    this.smokes = b.k.map((s) => ({ sid: s[0], x: s[1], y: s[2], life: s[3] / 10, radius: BALANCE.escapist.smokeRadius }));
+  }
+
+  // ------------------------------------------------------------------ entrada
+
+  setHeld(h: HeldInput): void {
+    this.held = h;
+  }
+
+  press(what: 'action' | 'special'): void {
+    if (what === 'action') {
+      this.aCount++;
+      this.me.actionBuf = PRESS_BUFFER;
+    } else {
+      this.bCount++;
+      this.me.specialBuf = PRESS_BUFFER;
+    }
+    this.sendInput();
+  }
+
+  say(phrase: number): void {
+    net.sendMsg({ t: 'say', p: phrase });
+  }
+
+  /** Envía la entrada solo si ha cambiado, y como mucho 15 veces por segundo. */
+  private sendInput(): void {
+    const x = Math.round(this.held.mx * 100);
+    const y = Math.round(this.held.my * 100);
+    const r = this.held.sprint ? 1 : 0;
+    const L = this.lastSent;
+    const changed = x !== L.x || y !== L.y || r !== L.r || this.aCount !== L.a || this.bCount !== L.b;
+    if (!changed) return;
+    const now = performance.now();
+    if (now - this.lastSendAt < INPUT_INTERVAL) return;
+    this.lastSendAt = now;
+    this.lastSent = { x, y, r, a: this.aCount, b: this.bCount };
+    net.sendMsg({ t: 'in', x, y, r, a: this.aCount, b: this.bCount });
+  }
+
+  destroy(): void {
+    this.unsub();
+  }
+}

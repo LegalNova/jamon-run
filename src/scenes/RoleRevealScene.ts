@@ -9,6 +9,7 @@ import { profile } from '../config/profile';
 import { BiomeId, getMap } from '../world/maps';
 import { text, UI } from '../ui/widgets';
 import { Backdrop, fadeIn, fadeTo } from './common';
+import type { OnlineModel } from '../net/OnlineModel';
 
 const SEGMENTS = 8;
 const SEG = (Math.PI * 2) / SEGMENTS;
@@ -32,9 +33,17 @@ export class RoleRevealScene extends Phaser.Scene {
     super('RoleReveal');
   }
 
-  init(data: { mapId?: BiomeId }): void {
-    this.mapId = data.mapId ?? 'forest';
-    this.role = Math.random() < 0.5 ? 'chaser' : 'escapist';
+  private online: OnlineModel | null = null;
+  private revealMs = 0;
+  private spinMs = 3600;
+
+  init(data: { mapId?: BiomeId; online?: OnlineModel; revealMs?: number }): void {
+    this.online = data.online ?? null;
+    this.revealMs = data.revealMs ?? 0;
+    // Online, el bando lo decide el servidor (la ruleta solo lo muestra).
+    this.mapId = this.online ? this.online.mapId : (data.mapId ?? 'forest');
+    this.role = this.online ? this.online.player().team : Math.random() < 0.5 ? 'chaser' : 'escapist';
+    this.spinMs = this.online ? Math.max(900, Math.min(3600, this.revealMs - 1600)) : 3600;
     this.phase = 'spin';
     this.t = 0;
     this.prompt = undefined;
@@ -98,11 +107,15 @@ export class RoleRevealScene extends Phaser.Scene {
     this.spin = this.tweens.add({
       targets: this.wheel,
       rotation: final,
-      duration: 3600,
+      duration: this.spinMs,
       ease: 'Cubic.easeOut',
       onComplete: () => this.reveal(),
     });
-    text(this, VIEW_W / 2, VIEW_H - 12, 'ENTER: SALTAR · ESC: VOLVER', { color: UI.muted });
+    text(this, VIEW_W / 2, VIEW_H - 12, this.online ? 'PARTIDA ONLINE · EMPIEZA EN UN MOMENTO' : 'ENTER: SALTAR · ESC: VOLVER', { color: UI.muted });
+    if (this.online) {
+      const model = this.online;
+      this.time.delayedCall(Math.max(this.spinMs + 900, this.revealMs - 150), () => fadeTo(this, 'Game', { model }));
+    }
   }
 
   private segUnderPointer(): number {
@@ -148,11 +161,13 @@ export class RoleRevealScene extends Phaser.Scene {
       ? [`${keyName(b.action)}: JAMONAZO`, `${keyName(b.special)}: LANZAR JAMÓN`, `${keyName(b.sprint)}: SPRINT`]
       : [`${keyName(b.action)}: DASH (ESQUIVA)`, `${keyName(b.special)}: BOMBA DE HUMO`, `${keyName(b.sprint)}: SPRINT`];
     lines.forEach((l, i) => text(this, cx, 174 + i * 10, l, { color: UI.focusLight }));
-    text(this, cx, 210, `${settings.chasers} AZULES VS ${settings.escapists} ROJOS`, { color: UI.muted });
+    const nCh = this.online ? this.online.roster.filter((r) => r.team === 'chaser').length : settings.chasers;
+    const nEs = this.online ? this.online.roster.length - nCh : settings.escapists;
+    text(this, cx, 210, `${nCh} AZULES VS ${nEs} ROJOS`, { color: UI.muted });
 
     this.time.delayedCall(450, () => {
       this.phase = 'ready';
-      this.prompt = text(this, cx, 230, 'ENTER / ESPACIO: ¡A JUGAR!', { color: 0xffffff });
+      if (!this.online) this.prompt = text(this, cx, 230, 'ENTER / ESPACIO: ¡A JUGAR!', { color: 0xffffff });
     });
   }
 
@@ -168,6 +183,7 @@ export class RoleRevealScene extends Phaser.Scene {
       }
     }
     if (this.prompt) this.prompt.setVisible(Math.floor(this.t * 2.5) % 2 === 0);
+    if (this.online) return; // online no se puede saltar ni volver
     if (input.back()) {
       audio.play('back');
       fadeTo(this, 'MapSelect');
@@ -175,7 +191,7 @@ export class RoleRevealScene extends Phaser.Scene {
     }
     if (input.confirm()) {
       if (this.phase === 'spin') {
-        this.spin.seek(3590);
+        this.spin.seek(this.spinMs - 10);
       } else if (this.phase === 'ready') {
         audio.play('click');
         fadeTo(this, 'Game', { mapId: this.mapId, role: this.role });

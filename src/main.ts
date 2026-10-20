@@ -1,8 +1,11 @@
 import Phaser from 'phaser';
 import { saveSettings, settings } from './config/settings';
 import { input } from './core/input';
+import { net } from './net/NetClient';
 import { BootScene } from './scenes/BootScene';
 import { CharacterScene } from './scenes/CharacterScene';
+import { LobbyScene } from './scenes/LobbyScene';
+import { OnlineScene } from './scenes/OnlineScene';
 import { ByeScene } from './scenes/ByeScene';
 import { toggleFullscreen } from './scenes/common';
 import { ControlsScene } from './scenes/ControlsScene';
@@ -20,8 +23,9 @@ import { UIScene } from './scenes/UIScene';
 const game = new Phaser.Game({
   type: Phaser.AUTO,
   parent: 'game',
-  width: window.innerWidth,
-  height: window.innerHeight,
+  // Nunca 0x0 (p. ej. pestaña oculta al cargar): WebGL no podría crear el lienzo.
+  width: Math.max(320, window.innerWidth),
+  height: Math.max(180, window.innerHeight),
   backgroundColor: '#0d0b14',
   pixelArt: true,
   roundPixels: true,
@@ -30,6 +34,7 @@ const game = new Phaser.Game({
     mode: Phaser.Scale.RESIZE,
     width: '100%',
     height: '100%',
+    min: { width: 320, height: 180 },
   },
   audio: { noAudio: true },
   input: { keyboard: false, gamepad: false },
@@ -51,6 +56,8 @@ const game = new Phaser.Game({
     ResultsScene,
     ByeScene,
     CharacterScene,
+    OnlineScene,
+    LobbyScene,
   ],
 });
 
@@ -66,4 +73,6 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyF' && !e.repeat && !input.isTyping() && !input.isCapturing()) toggleFullscreen();
 });
 
-(window as unknown as { __JAMON__: Phaser.Game }).__JAMON__ = game;
+// Acceso para depurar desde la consola.
+(window as unknown as { __JAMON__: Phaser.Game; __JAMON_NET__: typeof net }).__JAMON__ = game;
+(window as unknown as { __JAMON_NET__: typeof net }).__JAMON_NET__ = net;

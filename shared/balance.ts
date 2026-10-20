@@ -177,8 +177,8 @@ export const NET = {
   roomCodeLength: 5,
   /** Segundos que se guarda el sitio a un jugador desconectado. */
   reconnectSeconds: 15,
-  /** Retraso de interpolación de los demás jugadores (ms). */
-  interpolationDelayMs: 110,
+  /** Retraso de interpolación de los demás jugadores (ms, unos 2 snapshots). */
+  interpolationDelayMs: 100,
   /** Proporción de equipos: 1 perseguidor por cada N escapistas. */
   escapistsPerChaser: 3,
   /** Opciones de relleno con bots que puede elegir el anfitrión (0 = sin bots). */

@@ -68,7 +68,15 @@ export class TitleScene extends Phaser.Scene {
     audio.playMusic('menu');
     audio.play('click');
     applyFullscreen();
-    fadeTo(this, 'Menu');
+    // Enlace de invitación (?sala=CODIGO): directo a la sala.
+    const params = new URLSearchParams(location.search);
+    const sala = params.get('sala');
+    if (sala) {
+      params.delete('sala');
+      const rest = params.toString();
+      history.replaceState(null, '', location.pathname + (rest ? `?${rest}` : ''));
+      fadeTo(this, 'Online', { join: sala });
+    } else fadeTo(this, 'Menu');
   }
 
   update(_time: number, delta: number): void {

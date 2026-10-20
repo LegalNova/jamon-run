@@ -1,0 +1,25 @@
+# Servidor de JAMÓN RUN en Cloudflare Workers (plan gratuito).
+name = "jamon-run"
+main = "server/src/index.ts"
+compatibility_date = "2025-06-01"
+
+# El mismo Worker sirve el juego compilado (dist/) y las salas online.
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+
+[[durable_objects.bindings]]
+name = "ROOM"
+class_name = "Room"
+
+[[durable_objects.bindings]]
+name = "MATCHMAKER"
+class_name = "Matchmaker"
+
+# En el plan gratuito los Durable Objects tienen que usar SQLite.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room", "Matchmaker"]
+
+[observability]
+enabled = true

@@ -13,7 +13,7 @@ export function fadeTo(scene: Phaser.Scene, key: string, data?: object): void {
   scene.cameras.main.fadeOut(180, 13, 11, 20);
   scene.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
     s.__leaving = false;
-    scene.scene.start(key, data);
+    scene.scene.start(key, data ?? {}); // sin datos, Phaser reutilizaría los del arranque anterior
   });
 }
 

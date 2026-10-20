@@ -4,6 +4,7 @@ import { audio } from '../core/audio';
 import { input } from '../core/input';
 import { Button, Menu, panel, text, UI } from '../ui/widgets';
 import type { GameScene } from './GameScene';
+import { net } from '../net/NetClient';
 import { fitMenuCamera, toggleFullscreen, viewSize } from './common';
 
 export class PauseScene extends Phaser.Scene {
@@ -76,6 +77,7 @@ export class PauseScene extends Phaser.Scene {
     input.consume();
     const game = this.scene.get('Game') as GameScene;
     game.model?.destroy();
+    if (this.online) net.leave();
     this.scene.stop('UI');
     this.scene.stop('Game');
     audio.playMusic('menu');

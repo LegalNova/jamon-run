@@ -6,6 +6,7 @@ import { FONT, fontText } from '../gfx/font';
 import { Button, Menu, panel, text, UI } from '../ui/widgets';
 import { TEAM_COLORS } from '../gfx/palette';
 import { Backdrop, fadeIn, fadeTo } from './common';
+import { net } from '../net/NetClient';
 import type { ResultEntry, ResultsData } from './GameScene';
 
 function mmss(s: number): string {
@@ -80,24 +81,44 @@ export class ResultsScene extends Phaser.Scene {
     text(this, 330, 58, 'TODOS LOS JUGADORES', { color: UI.focusLight });
     const mvp = this.pickMvp(d.entries, d.winner);
     const list = [...d.entries].sort((a, b) => (a.team === b.team ? 0 : a.team === 'chaser' ? -1 : 1));
-    const rowH = Math.min(11, Math.floor(140 / list.length));
+    // Con muchos jugadores (online, hasta 20) la tabla pasa a dos columnas más compactas.
+    const twoCols = list.length > 12;
+    const perCol = twoCols ? Math.ceil(list.length / 2) : list.length;
+    const rowH = twoCols ? 12 : Math.min(11, Math.floor(140 / list.length));
     list.forEach((e, i) => {
-      const y = 72 + i * rowH;
+      const colIdx = Math.floor(i / perCol);
+      const x0 = twoCols ? 196 + colIdx * 138 : 198;
+      const x1 = twoCols ? x0 + 132 : 464;
+      const y = 72 + (i % perCol) * rowH;
       const col = TEAM_COLORS[e.team].light;
-      g.fillStyle(col, 1).fillRect(198, y - 2, 4, 4);
+      g.fillStyle(col, 1).fillRect(x0, y - 2, 4, 4);
       const name = (e === mvp ? '★ ' : '') + e.name;
-      this.add.bitmapText(206, y, FONT, fontText(name)).setOrigin(0, 0.5).setTint(e.isPlayer ? 0xfee761 : UI.text);
-      const stat =
-        e.team === 'chaser'
+      this.add.bitmapText(x0 + 7, y, FONT, fontText(twoCols ? name.slice(0, 11) : name)).setOrigin(0, 0.5).setTint(e.isPlayer ? 0xfee761 : UI.text);
+      const stat = twoCols
+        ? e.team === 'chaser'
+          ? `${e.stats.eliminations}P ${e.stats.hits}G`
+          : e.alive
+            ? 'VIVO'
+            : mmss(e.stats.timeSurvived)
+        : e.team === 'chaser'
           ? `PILLADOS ${e.stats.eliminations} · GOLPES ${e.stats.hits}`
           : `${e.alive ? 'VIVO' : 'FUERA'} · ${mmss(e.stats.timeSurvived)} · OBJ ${e.stats.items}`;
-      this.add.bitmapText(464, y, FONT, fontText(stat)).setOrigin(1, 0.5).setTint(e.alive || e.team === 'chaser' ? UI.text : UI.muted);
+      this.add.bitmapText(x1, y, FONT, fontText(stat)).setOrigin(1, 0.5).setTint(e.alive || e.team === 'chaser' ? UI.text : UI.muted);
     });
+    if (twoCols) text(this, 330, 196, 'P = PILLADOS · G = GOLPES · TIEMPO = AGUANTÓ', { color: UI.muted });
     if (mvp) text(this, 330, 208, `MVP: ${mvp.name}`, { color: 0xfee761 });
 
     this.menu = new Menu(true);
-    this.menu.add(new Button(this, VIEW_W / 2 - 60, VIEW_H - 22, 'REVANCHA', () => fadeTo(this, 'RoleReveal', { mapId: d.mapId }), 100, 18));
-    this.menu.add(new Button(this, VIEW_W / 2 + 60, VIEW_H - 22, 'MENÚ', () => fadeTo(this, 'Menu'), 100, 18));
+    if (d.online) {
+      this.menu.add(new Button(this, VIEW_W / 2 - 64, VIEW_H - 22, 'VOLVER A LA SALA', () => fadeTo(this, 'Lobby'), 120, 18, UI.green));
+      this.menu.add(new Button(this, VIEW_W / 2 + 64, VIEW_H - 22, 'SALIR', () => {
+        net.leave();
+        fadeTo(this, 'Menu');
+      }, 100, 18));
+    } else {
+      this.menu.add(new Button(this, VIEW_W / 2 - 60, VIEW_H - 22, 'REVANCHA', () => fadeTo(this, 'RoleReveal', { mapId: d.mapId }), 100, 18));
+      this.menu.add(new Button(this, VIEW_W / 2 + 60, VIEW_H - 22, 'MENÚ', () => fadeTo(this, 'Menu'), 100, 18));
+    }
     this.time.delayedCall(1200, () => audio.playMusic('menu'));
   }
 
@@ -128,7 +149,7 @@ export class ResultsScene extends Phaser.Scene {
     this.backdrop.update(delta / 1000);
     if (input.back()) {
       audio.play('back');
-      fadeTo(this, 'Menu');
+      fadeTo(this, this.data_.online ? 'Lobby' : 'Menu');
       return;
     }
     this.menu.update();
