@@ -272,6 +272,8 @@ export class Room extends DurableObject<Env> {
         p.ws = null;
         this.broadcastLobby();
         void this.report();
+        // Si ya no queda nadie, la partida de los bots se para.
+        if (!this.players.some((x) => x.connected)) this.stopLoop(true);
         break;
       case 'hello':
         break;
@@ -500,7 +502,8 @@ export class Room extends DurableObject<Env> {
 
   /** Ranking mundial: solo cuentan las personas (no los bots). */
   private async recordRank(sim: Sim): Promise<void> {
-    const humans = sim.chars.filter((c) => this.roster.find((r) => r.id === c.id)?.human);
+    // Solo cuentan las personas que siguen en la sala al acabar.
+    const humans = sim.chars.filter((c) => this.players.some((p) => p.id === c.id && p.connected));
     if (!humans.length) return;
     try {
       const mm = this.env.MATCHMAKER.get(this.env.MATCHMAKER.idFromName('global'));
