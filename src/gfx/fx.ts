@@ -9,6 +9,8 @@ const DUST: Record<BiomeId, number[]> = {
   paris: [0xc8c2b8, 0xa9a49b, 0xe0dbd0],
   barcelona: [0xd9d3c8, 0xefd9a0, 0xbdb7ad],
   ceuta: [0xf2e8d0, 0xefd9a0, 0xe2d0a6],
+  vegas: [0x4a3460, 0x6a4c84, 0xc9a04a],
+  casa: [0xc8b090, 0xe0d0b8, 0xa08060],
 };
 
 /** Efectos visuales reutilizables de la partida. */

@@ -1,5 +1,5 @@
 // Partidas de bots sin pantalla en todos los modos: ganadores, duración, monedas y rendimiento.
-import { MAPS, MapId } from '../shared/maps';
+import { MAPS, MapId, mapAllowed } from '../shared/maps';
 import { scaleFor } from '../shared/mapScale';
 import { defaultHunters } from '../shared/modes/rules';
 import { Sim } from '../shared/sim/Sim';
@@ -11,7 +11,7 @@ const N = Number(argv[2] ?? 4);
 const PLAYERS = Number(argv[3] ?? 10);
 const modes: ModeId[] = ['pilla', 'infeccion', 'bomba', 'escondite'];
 for (const mode of modes) {
-  const maps = MAPS.filter((m) => (mode === 'bomba' ? m.arena || m.city : !m.arena)).map((m) => m.id as MapId);
+  const maps = MAPS.filter((m) => mapAllowed(m, mode) && (mode === 'bomba' ? m.arena || m.city : !m.arena)).map((m) => m.id as MapId);
   const res: string[] = [];
   let ms = 0;
   let steps = 0;

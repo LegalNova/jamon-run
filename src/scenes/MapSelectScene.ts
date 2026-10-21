@@ -5,7 +5,7 @@ import { input } from '../core/input';
 import { FONT, fontText } from '../gfx/font';
 import { buildMiniTexture } from '../gfx/tiles';
 import { Grid } from '../world/grid';
-import { MapDef, MAPS, styleOf } from '../world/maps';
+import { mapAllowed, MapDef, MAPS, styleOf } from '../world/maps';
 import { modeInfo } from '../../shared/modes/rules';
 import type { ModeId } from '../../shared/sim/types';
 import { Button, Focusable, Menu, text, UI } from '../ui/widgets';
@@ -17,7 +17,8 @@ const ACCENTS: Record<string, number> = {
   snow: 0x7cc8ff,
   paris: 0x9aa7bf,
   barcelona: 0xe8c84a,
-  ceuta: 0x5ab8e8,
+  vegas: 0xff4fd8,
+  casa: 0xfeae34,
   plaza: 0xff7ab8,
   azotea: 0xb55088,
   patio: 0xfee761,
@@ -28,7 +29,8 @@ const TAGS: Record<string, string> = {
   snow: 'HIELO RESBALADIZO',
   paris: 'METRO: TELETRANSPORTE',
   barcelona: 'CARRIL BICI TURBO',
-  ceuta: 'RÁFAGAS DE LEVANTE',
+  vegas: 'PREMIO GORDO Y ASCENSOR',
+  casa: 'PUERTAS Y LUCES',
   plaza: 'ARENA PEQUEÑA',
   azotea: 'ARENA PEQUEÑA',
   patio: 'ARENA PEQUEÑA',
@@ -37,10 +39,12 @@ const TAGS: Record<string, string> = {
 /** Mapas que se ofrecen en cada modo (6 por pantalla). */
 export function mapsForMode(mode: ModeId): MapDef[] {
   if (modeInfo(mode).arenas) {
-    const order = ['plaza', 'azotea', 'patio', 'paris', 'barcelona', 'ceuta'];
+    const order = ['plaza', 'azotea', 'patio', 'paris', 'barcelona', 'vegas'];
     return order.map((id) => MAPS.find((m) => m.id === id)!);
   }
-  return MAPS.filter((m) => !m.arena);
+  // El Escondite estrena la casa (y deja fuera la nieve para que quepan 6).
+  if (mode === 'escondite') return ['casa', 'forest', 'desert', 'paris', 'barcelona', 'vegas'].map((id) => MAPS.find((m) => m.id === id)!);
+  return MAPS.filter((m) => !m.arena && mapAllowed(m, mode));
 }
 const CW = 150;
 const CH = 112;
@@ -141,7 +145,7 @@ export class MapSelectScene extends Phaser.Scene {
       return card;
     });
     this.menu.add(new Button(this, VIEW_W / 2, VIEW_H - 8, 'VOLVER', () => fadeTo(this, 'ModeSelect'), 80, 13));
-    const sub = info.arenas ? 'ARRIBA ARENAS PEQUEÑAS · ABAJO CIUDADES' : info.night ? `${info.name} · DE NOCHE` : 'ARRIBA CLÁSICOS · ABAJO CIUDADES';
+    const sub = info.arenas ? 'ARRIBA ARENAS PEQUEÑAS · ABAJO CIUDADES' : this.mode === 'escondite' ? 'NUEVO: LA CASA, CON PUERTAS Y LUCES' : info.night ? `${info.name} · DE NOCHE` : 'ARRIBA CLÁSICOS · ABAJO CIUDADES';
     text(this, VIEW_W / 2, 19, sub, { color: UI.muted });
   }
 

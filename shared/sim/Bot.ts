@@ -1,5 +1,6 @@
 import { AIParams, BALANCE, MODES, RESCUE, TILE } from '../balance';
 import { DistField, Grid, Terrain } from '../grid';
+import type { HouseLayout } from '../house';
 import type { MapId } from '../maps';
 import type { Prop } from '../props';
 import { wrapAngle } from './Char';
@@ -14,6 +15,9 @@ export interface BotWorld {
   /** Fase del modo (Escondite: 0 = esconderse). */
   phase: number;
   props: Prop[];
+  /** La casa: habitaciones y luces encendidas. */
+  house: HouseLayout | null;
+  lights: Uint8Array;
   /** Pistas sonoras recientes (Escondite). */
   hints: { x: number; y: number; t: number }[];
   /** ¿Persigue (cazador) o huye? Depende del modo. */
@@ -57,6 +61,8 @@ export class BotBrain {
   private wanderTimer = 0;
   private lastSeen = new Map<number, { x: number; y: number; t: number }>();
   private rescueTarget: SimChar | null = null;
+  /** La casa: interruptor al que va a encender la luz (-1 = ninguno). */
+  private lightGoal = -1;
   /** Escondite: objeto/sospechoso al que va a golpear, y los ya comprobados. */
   private probe: { x: number; y: number; char: SimChar | null } | null = null;
   private checked = new Set<string>();
@@ -196,8 +202,30 @@ export class BotBrain {
       this.steerChaser(dt, it);
       return;
     }
+    // La casa: si la habitación está a oscuras, primero enciende la luz.
+    if (this.lightGoal >= 0) {
+      const h = w.house!;
+      if (w.lights[h.roomOf[this.lightGoal]] || w.grid.tileOf(me.x, me.y) === this.lightGoal) this.lightGoal = -1;
+      else {
+        const p = this.followPath();
+        const l = Math.hypot(p.x, p.y);
+        if (l > 0.01) {
+          it.mx = p.x / l;
+          it.my = p.y / l;
+        }
+        return;
+      }
+    }
     if (this.decideTimer <= 0 || !this.probe) {
       this.decideTimer = w.ai.reaction * 1.5;
+      const h = w.house;
+      const r = h ? h.roomOf[w.grid.tileOf(me.x, me.y)] : -1;
+      if (h && r >= 0 && !w.lights[r] && h.rooms[r].switches.length && rand() < 0.6) {
+        this.lightGoal = h.rooms[r].switches[0];
+        const c = w.grid.tileCenter(this.lightGoal);
+        this.setGoal(this.lightGoal, c.x, c.y, true);
+        return;
+      }
       this.pickProbe();
     }
     const pr = this.probe;

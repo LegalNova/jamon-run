@@ -60,7 +60,7 @@ export type Sfx =
   | 'thump'
   | 'ball'
 
-type Track = 'menu' | 'game';
+type Track = 'menu' | 'game' | 'vegas';
 
 const NOTE_INDEX: Record<string, number> = { C: 0, 'C#': 1, D: 2, 'D#': 3, E: 4, F: 5, 'F#': 6, G: 7, 'G#': 8, A: 9, 'A#': 10, B: 11 };
 
@@ -86,6 +86,34 @@ interface Song {
 }
 
 const SONGS: Record<Track, Song> = {
+  // Las Vegas: lounge de neón en re menor, con bajo andando y arpegio brillante.
+  vegas: {
+    bpm: 128,
+    leadWave: 'sawtooth',
+    leadVol: 0.07,
+    lead: seq(`
+      D5 - - F5 - A5 - - C6 - A5 - G5 - F5 -
+      E5 - - G5 - A#5 - - A5 - G5 - E5 - C5 -
+      D5 - - F5 - A5 - - D6 - C6 - A5 - G5 -
+      A5 - - - G5 - F5 - E5 - - - C#5 - E5 -
+      F5 - - A5 - C6 - - F6 - E6 - D6 - C6 -
+      A#5 - - G5 - A#5 - - D6 - C6 - A#5 - A5 -
+      A5 - F5 - D5 - F5 - A5 - G5 - F5 - E5 -
+      D5 - - - - - A4 - D5 - - - - - - -
+    `),
+    bass: seq(`
+      D2 - D3 - F2 - A2 - D2 - D3 - C3 - A2 -
+      C2 - C3 - E2 - G2 - C2 - C3 - A#2 - G2 -
+      D2 - D3 - F2 - A2 - D2 - D3 - C3 - A2 -
+      A1 - A2 - C#2 - E2 - A1 - A2 - G2 - E2 -
+      F2 - F3 - A2 - C3 - F2 - F3 - E3 - C3 -
+      G2 - G3 - A#2 - D3 - G2 - G3 - F3 - D3 -
+      A1 - A2 - C#2 - E2 - A1 - A2 - G2 - E2 -
+      D2 - D3 - A2 - F2 - D2 - - D2 - - - -
+    `),
+    arp: seq(`D5 F5 A5 D6 A5 F5`),
+    drums: seq(`k - h h s - h - k k h - s - h h`),
+  },
   game: {
     bpm: 150,
     leadWave: 'square',

@@ -6,8 +6,30 @@
 import { MODES, TILE } from './balance';
 import { Grid, Terrain } from './grid';
 
-export const PROP_KINDS = ['papelera', 'farola', 'maceta', 'caja', 'silla', 'barril', 'banco', 'cubo'] as const;
+export const PROP_KINDS = [
+  'papelera', 'farola', 'maceta', 'caja', 'silla', 'barril', 'banco', 'cubo',
+  // muebles de la casa
+  'sofa', 'lampara', 'nevera', 'lavadora', 'cama', 'armario', 'tele', 'bici',
+] as const;
 export type PropKind = (typeof PROP_KINDS)[number];
+
+const kindIndex = (k: PropKind) => PROP_KINDS.indexOf(k);
+/** Objetos de la calle y de la casa (en la casa solo hay muebles). */
+export const STREET_KINDS = [0, 1, 2, 3, 4, 5, 6, 7];
+export const HOUSE_KINDS = (['sofa', 'lampara', 'nevera', 'lavadora', 'cama', 'armario', 'tele', 'bici', 'maceta', 'caja'] as PropKind[]).map(kindIndex);
+/** Muebles fijos de la casa: dígito del mapa → tipo. */
+const DIGIT_KIND: Record<string, PropKind> = { '1': 'sofa', '2': 'lampara', '3': 'nevera', '4': 'lavadora', '5': 'cama', '6': 'armario', '7': 'maceta', '8': 'tele', '9': 'caja', '0': 'bici' };
+/** Objetos que dan luz de noche (farola y lámpara). */
+export const LIGHT_KINDS = [kindIndex('farola'), kindIndex('lampara')];
+
+/** ¿Es un mapa con muebles (la casa)? */
+export function isHouse(grid: Grid): boolean {
+  return grid.chars.some((r) => r.some((c) => c in DIGIT_KIND));
+}
+
+export function kindsFor(grid: Grid): number[] {
+  return isHouse(grid) ? HOUSE_KINDS : STREET_KINDS;
+}
 
 export interface Prop {
   k: number;
@@ -31,13 +53,25 @@ export function rng(seed: number): () => number {
 export function buildProps(grid: Grid, seed: number): Prop[] {
   const r = rng(seed);
   const out: Prop[] = [];
+  const kinds = kindsFor(grid);
+  const used = new Set<number>();
+  // La casa: los muebles que vienen dibujados en el mapa.
+  for (const t of grid.passable) {
+    const x = t % grid.w;
+    const y = (t / grid.w) | 0;
+    const kind = DIGIT_KIND[grid.chars[y][x]];
+    if (!kind) continue;
+    used.add(t);
+    out.push({ k: kindIndex(kind), x: x * TILE + TILE / 2, y: y * TILE + TILE / 2 + 2, rot: Math.floor(r() * 4) });
+  }
+  const fixed = out.length;
   const ok = (t: number) => {
     const ter = grid.terrain[t];
     if (ter !== Terrain.Ground && ter !== Terrain.Bush) return false;
     const x = t % grid.w;
     const y = (t / grid.w) | 0;
     const c = grid.chars[y][x];
-    return c !== 'X' && c !== 'M';
+    return c !== 'X' && c !== 'M' && c !== 'D' && c !== 'J';
   };
   const cand = grid.passable.filter(ok);
   // Barajado determinista.
@@ -45,8 +79,8 @@ export function buildProps(grid: Grid, seed: number): Prop[] {
     const j = Math.floor(r() * (i + 1));
     [cand[i], cand[j]] = [cand[j], cand[i]];
   }
-  const want = Math.floor(cand.length / MODES.escondite.propDensity);
-  const used = new Set<number>();
+  // En la casa, además de los muebles fijos, unos pocos más repartidos.
+  const want = fixed ? fixed + Math.floor(fixed * 0.3) : Math.floor(cand.length / MODES.escondite.propDensity);
   for (const t of cand) {
     if (out.length >= want) break;
     const x = t % grid.w;
@@ -61,8 +95,8 @@ export function buildProps(grid: Grid, seed: number): Prop[] {
     if (walls === 0 && r() < 0.45) continue;
     used.add(t);
     // Agrupa por tipo según la zona para que parezca un mobiliario urbano coherente.
-    const zone = ((x >> 3) * 7 + (y >> 3) * 13) % PROP_KINDS.length;
-    const k = r() < 0.55 ? zone : Math.floor(r() * PROP_KINDS.length);
+    const zone = ((x >> 3) * 7 + (y >> 3) * 13) % kinds.length;
+    const k = kinds[r() < 0.55 ? zone : Math.floor(r() * kinds.length)];
     out.push({
       k,
       x: x * TILE + TILE / 2 + Math.round((r() - 0.5) * 6),

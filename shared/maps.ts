@@ -20,10 +20,23 @@
  *   S  Sagrada Família (sólido)       g  banco de trencadís (sólido)
  *   k  carril bici (acelera)          W  casas blancas (sólido)
  *   C  Hércules de Ceuta (sólido)
+ *
+ * Las Vegas
+ *   N  casino (sólido)                Y  tragaperras (sólida, suelta premios)
+ *   V  coche (sólido)                 z  parking
+ *   I  columna del parking (sólida)   M  ascensor entre plantas del parking
+ *
+ * La casa (Escondite)
+ *   f  parqué   u  baldosa   p  hormigón (garaje)   v  sótano   a  desván   y  escalera
+ *   D  puerta (se abre sola al acercarte; cerrada tapa la vista)
+ *   J  interruptor de la luz de la habitación
+ *   c  mesa (sólida)   K  encimera (sólida)
+ *   1 sofá  2 lámpara  3 nevera  4 lavadora  5 cama  6 armario  7 maceta  8 tele  9 cajas  0 bici
+ *   (los muebles son objetos del Escondite: no son sólidos y te puedes convertir en ellos)
  */
 
 /** Estilo visual de los tiles (cada mapa usa uno). */
-export type BiomeId = 'forest' | 'desert' | 'snow' | 'paris' | 'barcelona' | 'ceuta';
+export type BiomeId = 'forest' | 'desert' | 'snow' | 'paris' | 'barcelona' | 'ceuta' | 'vegas' | 'casa';
 /** Arenas pequeñas para Jamón Bomba. */
 export type ArenaId = 'plaza' | 'azotea' | 'patio';
 export type MapId = BiomeId | ArenaId;
@@ -40,6 +53,8 @@ export interface MapDef {
   arena?: boolean;
   /** Estilo de los tiles (por defecto, el propio id). */
   style?: BiomeId;
+  /** Solo se ofrece en estos modos (por defecto, en todos). */
+  modes?: string[];
 }
 
 const wrap = (inner: string[]): string[] => {
@@ -232,40 +247,77 @@ export const MAPS: MapDef[] = [
     ]),
   },
   {
-    id: 'ceuta',
-    name: 'CEUTA',
-    subtitle: 'Murallas Reales y foso',
-    description: ['El foso de San Felipe y', 'el monte Hacho. Ojo con', 'las ráfagas de levante.'],
+    id: 'vegas',
+    name: 'LAS VEGAS',
+    subtitle: 'Neón, casinos y fuente',
+    description: ['Tragaperras, coches,', 'un parking de dos plantas', 'y callejones traseros.'],
     city: true,
     rows: wrap([
-      'T.................###~~~~###.................T',
-      '.WWWW..WWWWW.WWW..###~~~~###.,,,,,,,,,,,,,,,,.',
-      '.WWWW..WWWWW.WWW..###~~~~###.,,,,,T,,,,,,,,,,.',
-      '.WWWW..WWWWW.WWW..###~~~~###.,,T,,,,,,,,,,T,,.',
-      '..................###~~~~###.,,,,o,,,,T,,,,,,.',
-      '.....................====....,,,,,,,,rr,,,,,,.',
-      '...o.......o.........====....,,,,,,,,,,,,r,,,.',
-      '..................###~~~~###.,,,,,,,T,,,,,,,,.',
-      '.WWWW.T...T..WWW..###~~~~###.,,,T,,,,,,,,,,,,.',
-      '.WWWW..CC....WWW..###~~~~###.,,,,,,,,,,,T,,,,.',
-      '.WWWW..CC....WWW..###~~~~###.,,,,r,,,,,,,,,,,.',
-      '.WWWW.............###~~~~###.,,,,,,T,,,bbb,T,.',
-      '......T...T.......###~~~~###.,T,,,,,,,,,,,,,,.',
-      '...............o.....====....,,,,,,,,,,,,,,,,.',
-      '.......bbb...........====.........XX.....o....',
-      '..................###~~~~###..................',
-      '.WWWW.......WWWW..###~~~~###..WWWW...WWWWW....',
-      '.WWWW.......WWWW..###~~~~###..WWWW...WWWWW....',
-      '.WWWW....XX.WWWW..###~~~~###..WWWW...WWWWW....',
-      '..................###~~~~###.T.....T..........',
-      '.....ro...........###~~~~###........r..o......',
-      '.....................====.....................',
-      'ssssssssssssssssss...====...ssssssssssssssssss',
-      'sssTsssssTssssTsss###~~~~###sssTsssssTssssTsss',
-      'ssssssssssssosssss###~~~~###ssssssssssssssssss',
-      'ssssssssssssssssss###~~~~###ssssssssssssssssss',
-      '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
-      '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+      '.....................................zzzzozzzz',
+      'NNNNNNNN.NNNNNNNNNN..NNNNNNNN.NNNNNN.zIzVVzzIz',
+      'NNNNNNNN.NNNNNNNNNN..NNNNNNNN.NNNNNN.zzzzzzMzz',
+      'NNNNNNNN.NNNNNNNNNN..NNNNNNNN.NNNNNN.zzzzzzzzz',
+      'NNNNNNNN.NNNNNNNNNN..NNNNNNNN.NNNNNN.zIzVVzzIz',
+      ',Y,Y,,T,,,Y,Y,Y,,T,,,,Y,Y,,T,,,Y,Y,,,zzzzzzzzz',
+      '..............................................',
+      '....VV..........VV............VV..............',
+      '.............X......X.....X......X............',
+      '..........VV...........VV............VV.......',
+      ',,T,,,,,,T,,,,,,T,,,,,,T,,,,,,T,,,,,,T,,,,,,T,',
+      ',,,,,,,,,,,,,,,,,,,,,,o,,,,,,,,,,,,,,,,,,,,,,,',
+      ',,,YY,,,,T,,,,,,~~~~~~~~~~~~~~,,,,,,T,,,,YY,,,',
+      ',,,,,,,,,,,Y,,,~~~~~~~~~~~~~~~~,,Y,,,,,,,,,,o,',
+      ',o,,,,,,,,,Y,,,~~~~~~~~~~~~~~~~,,Y,,,,,,,,,,,,',
+      ',,,YY,,,,T,,,,,,~~~~~~~~~~~~~~,,,,,,T,,,,YY,,,',
+      ',,,,,,,,,,,,,,,,,,,,,,,o,,,,,,,,,,,,,,,,,,,,,,',
+      ',,,,,T,,,,,,,T,,,,,,,T,,,,,,,T,,,,,,,T,,,,,,,T',
+      '.......VV...................VV................',
+      '..............................................',
+      '...............VV......................VV.....',
+      ',,,,,,,,,,,,,,,,,,,,,Y,,,Y,,,Y,,,Y,,,Y,,,,,,,,',
+      'zzzzzzzzzVVzzzzzzz..NNNNNNN.NNNNNNN.NNNNN.NNNN',
+      'zzIzzzzIzzzzIzzzIz..NNNNNNN.NNNNNNN.NNNNN.NNNN',
+      'zzzzVVzzzzzzzzzzzz..NNNNNNN.NNNNNNN.NNNNN.NNNN',
+      'zzzzzzzzzzzzzVVzzz..NNNNNNN.NNNNNNN.NNNNN.NNNN',
+      'zzIzzzzIzzozIzzzIz..NNNNNNN.NNNNNNN.NNNNN.NNNN',
+      'zMzzzzzzzzzzzzzzzz.........o..................',
+    ]),
+  },
+  {
+    id: 'casa',
+    name: 'LA CASA',
+    subtitle: 'Escondite en casa',
+    description: ['Puertas que se abren solas,', 'luces en cada habitación', 'y muebles por todas partes.'],
+    modes: ['escondite'],
+    rows: wrap([
+      'aaaaaaaaaaaa#ffffffff#ffffffff#uuuuuuu#fffffff',
+      'a9a9aaaaaaaa#f5ffff6f#f5ffff6f#u4uuu7u#f5fff6f',
+      'aaaaaaaa6aaa#ffffffff#ffffffff#uuuuuuu#fffffff',
+      'aaaaaa0aaaaa#ffffffff#ffffofff#uuuuuuu#fffffff',
+      'aaaaaaaaaa9a#7ffff2ff#fffff8ff#uuuu6uu#fffff2f',
+      'aa2aaaaaaaaa#ffffffff#2fffffff#uuuuuuu#fffffff',
+      'aaaaaaaaa7aa#ffJfffff#ffJfffff#uuJuuuu#ffJffff',
+      'aaaaJaaaaaaa####DD#######DD#######D#######D###',
+      '#####DD######fJfffff7fffffffffffffff7fffffffff',
+      'yyyyyyyyyyyyDfffffffffffffffff2fffffffffffff6f',
+      'yyyyyyyyyoyJ#####D#########D##########DD######',
+      'ffffffffffff#u3uuuuu3u#fffJfffff#ffffJffffffff',
+      'ff7fffffffff#uuuuuuuuu#fffffffff#f1fffff8fffff',
+      'fffffffff2ff#Juuuuuuuu#f2fffff7f#fffffffffff2f',
+      'ffffffffffffDuKKKKuuuuDfffffffffDfffffffffffff',
+      'fff9ffffffffDuuuuuuuuuDfffccffffDfffffccfffoff',
+      'ffffffffffff#uu4uuuuuu#fffccffff#ff1ffffffffff',
+      'yyyyyyyyyyyy#uuuuuu7uu#f6ffff8ff#ffffffff7ff1f',
+      'yyyyyyyyyyyy#uuuuuuuuu#fffffffff#fffffffffffff',
+      '#####DD#########DD#########D##########DD######',
+      'vvvvJvvvvvvv#fffffffff#uuuuuuuu#ppppJppppppppp',
+      'v9v9vvvvvvvv#f7fffff6f#uuuuuu9u#p9p9pppppppp0p',
+      'vvvvvvvvv4vv#fffffffff#Juuuuuuu#pppppppppppppp',
+      'vvvvv9vvvvvv#fffffffffDuuuuuuuuDppppppVVpppppp',
+      'vvvvvvvvvvvvDfffffffffDuuuuuuuu#ppppppVVppp0pp',
+      'v6vvvvvvvvvv#Jffffffff#uuuuuuuu#pppppppppppppp',
+      'vvvvvv0vvv9v#ffXXfXf0f#u4u4uu7u#p9ppppppoppp9p',
+      'vvvvvvvvvvvv#f2fffffff#uuuuuuuu#pppppppppppppp',
     ]),
   },
   {
@@ -356,6 +408,11 @@ export const MAPS: MapDef[] = [
 
 export function getMap(id: MapId): MapDef {
   return MAPS.find((m) => m.id === id) ?? MAPS[0];
+}
+
+/** ¿Se puede jugar este modo en este mapa? (La casa es solo para el Escondite.) */
+export function mapAllowed(m: MapDef, mode: string): boolean {
+  return !m.modes || m.modes.includes(mode);
 }
 
 /** Estilo de tiles de un mapa. */

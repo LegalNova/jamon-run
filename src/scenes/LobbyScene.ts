@@ -5,7 +5,7 @@ import { NET, PARON, ParonLevel } from '../../shared/balance';
 const PARON_LEVELS = Object.keys(PARON.levels) as ParonLevel[];
 const PARON_NAMES: Record<ParonLevel, string> = { no: 'NINGUNO', pocos: 'POCOS', normal: 'NORMAL', muchos: 'MUCHOS' };
 import { LOOK_COLORS } from '../../shared/look';
-import { MAPS } from '../../shared/maps';
+import { mapAllowed, MAPS } from '../../shared/maps';
 import { MODE_LIST, modeInfo } from '../../shared/modes/rules';
 import type { ModeId } from '../../shared/sim/types';
 import type { ServerMsg } from '../../shared/protocol';
@@ -87,7 +87,7 @@ export class LobbyScene extends Phaser.Scene {
       ['MODO', () => (cur()?.mode === 'voto' || !cur() ? 'VOTACIÓN' : SHORT[cur()!.mode as ModeId]), (d) => set({ mode: cycle(modes, cur()?.mode, d) }), true],
       ['TU VOTO', () => (me()?.vote ? SHORT[me()!.vote!] : '-'), (d) => net.sendMsg({ t: 'vote', m: cycle(MODE_IDS, me()?.vote ?? undefined, d) }), false],
       ['PARONES', () => PARON_NAMES[(cur()?.paron ?? 'normal') as ParonLevel], (d) => set({ paron: cycle(PARON_LEVELS, (cur()?.paron ?? 'normal') as ParonLevel, d) }), true],
-      ['MAPA', () => MAPS.find((m) => m.id === cur()?.mapId)?.name ?? '', (d) => set({ mapId: cycle(MAPS.map((m) => m.id), cur()?.mapId, d) }), true],
+      ['MAPA', () => MAPS.find((m) => m.id === cur()?.mapId)?.name ?? '', (d) => set({ mapId: cycle(MAPS.filter((m) => cur()?.mode === 'voto' || mapAllowed(m, cur()?.mode ?? 'pilla')).map((m) => m.id), cur()?.mapId, d) }), true],
       ['CAZADORES', () => (cur()?.hunters ? String(cur()!.hunters) : 'AUTO'), (d) => set({ hunters: cycle(NET.huntersOptions, cur()?.hunters as never, d) }), true],
       ['DURACIÓN', () => fmt(cur()?.duration ?? 120), (d) => set({ duration: cycle(NET.durationOptions, cur()?.duration as never, d) }), true],
       ['BOTS', () => (cur()?.botFill ? `HASTA ${cur()!.botFill}` : 'NO'), (d) => set({ botFill: cycle(NET.botFillOptions, cur()?.botFill as never, d) }), true],

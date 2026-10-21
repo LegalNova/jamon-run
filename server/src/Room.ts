@@ -2,7 +2,7 @@ import { DurableObject } from 'cloudflare:workers';
 import { BALANCE, NET, PHRASES } from '../../shared/balance';
 import { defaultHunters, validMode } from '../../shared/modes/rules';
 import { botName, randomLook, sanitizeLook } from '../../shared/look';
-import { MAPS } from '../../shared/maps';
+import { getMap, mapAllowed, MAPS } from '../../shared/maps';
 import { scaleFor } from '../../shared/mapScale';
 import {
   ClientMsg,
@@ -383,8 +383,10 @@ export class Room extends DurableObject<Env> {
       const name = botName(bi++);
       return { id: botId++, name: `${name}`, team, look: randomLook(name), human: false };
     });
-    const scale = scaleFor(total, this.settings.mapId);
-    this.sim = new Sim({ mode, mapId: this.settings.mapId, scale, duration: this.settings.duration, difficulty: this.settings.difficulty, roster: this.roster, paron: this.settings.paron });
+    // La casa es solo para el Escondite: con otro modo (p. ej. tras una votación) se juega en el bosque.
+    const mapId = mapAllowed(getMap(this.settings.mapId), mode) ? this.settings.mapId : 'forest';
+    const scale = scaleFor(total, mapId);
+    this.sim = new Sim({ mode, mapId, scale, duration: this.settings.duration, difficulty: this.settings.difficulty, roster: this.roster, paron: this.settings.paron });
     this.paron = null;
     this.usedThisMatch = new Set();
     // El modo puede cambiar los equipos (Jamón Bomba: todos contra todos).

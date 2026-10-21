@@ -4,7 +4,7 @@ import { wrapAngle } from '../sim/Char';
 import type { SimChar } from '../sim/Char';
 import type { Sim } from '../sim/Sim';
 import type { Team } from '../sim/types';
-import { PROP_KINDS } from '../props';
+import { kindsFor } from '../props';
 import { BaseMode, ModeNet } from './types';
 
 const M = MODES.escondite;
@@ -60,14 +60,15 @@ export class EsconditeMode extends BaseMode {
         best = i;
       }
     });
+    const kinds = kindsFor(sim.grid);
     let k: number;
     if (best >= 0 && bd <= M.disguiseRange && sim.props[best].k !== c.disguise) {
       k = sim.props[best].k;
       c.rot = sim.props[best].rot;
     } else if (c.disguise >= 0) {
-      k = (c.disguise + 1) % PROP_KINDS.length;
+      k = kinds[(kinds.indexOf(c.disguise) + 1) % kinds.length];
     } else {
-      k = best >= 0 ? sim.props[best].k : Math.floor(sim.random() * PROP_KINDS.length);
+      k = best >= 0 ? sim.props[best].k : kinds[Math.floor(sim.random() * kinds.length)];
     }
     c.disguise = k;
     c.dashTime = 0;

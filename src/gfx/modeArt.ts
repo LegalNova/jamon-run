@@ -16,6 +16,11 @@ function propGrid(kind: number, side: boolean): PixelGrid {
   const g = new PixelGrid(CHAR_W, CHAR_H);
   const base = CHAR_H - 2; // fila del suelo (igual que los pies de un personaje)
   const P = (x: number, y: number, rows: string[], map: Record<string, string>) => g.pattern(x, y, rows, map);
+  // Centrado y apoyado en el suelo (frente o lado).
+  const put = (front: string[], sideRows: string[], map: Record<string, string>) => {
+    const rows = side ? sideRows : front;
+    P(Math.floor((CHAR_W - rows[0].length) / 2), base + 1 - rows.length, rows, map);
+  };
   switch (PROP_KINDS[kind]) {
     case 'papelera': {
       const m = { g: '#3e8948', G: '#265c42', l: '#63c74d', k: '#1f1a2b', w: '#c2c3c7' };
@@ -73,6 +78,63 @@ function propGrid(kind: number, side: boolean): PixelGrid {
         : ['.kkkkkk.', 'kwwwwwwk', 'blbbbbbB', 'blbbbbbB', 'blbbbbbB', 'blbbbbbB', '.bbbbbB.', '.BBBBBB.'], m);
       break;
     }
+    // ---- muebles de la casa
+    case 'sofa':
+      put(
+        ['..RRRRRRRRRRRR..', '.RrrrrrrrrrrrrR.', '.RrrrrrrrrrrrrR.', 'RRRrrrrrrrrrrRRR', 'RrRllllllllllRrR', 'RrRlllllRllllRrR', 'RrRRRRRRRRRRRRrR', 'RRRRRRRRRRRRRRRR', '.k............k.'],
+        ['RR......', 'RrR.....', 'RrR.....', 'RrRlllll', 'RrRlllll', 'RRRRRRRR', 'RRRRRRRR', 'k......k'],
+        { R: '#7a1f2a', r: '#b8343c', l: '#d85a5a', k: '#262033' },
+      );
+      break;
+    case 'lampara':
+      put(
+        ['..yyyyy..', '.yyyyyyy.', '.ywyyyyy.', 'yyyyyyyYY', 'YYYYYYYYY', '....k....', '....k....', '....k....', '....k....', '....K....', '....k....', '....k....', '....k....', '..kkkkk..'],
+        ['..yyy..', '.yyyyy.', '.wyyyy.', 'yyyyyYY', 'YYYYYYY', '...k...', '...k...', '...k...', '...k...', '...K...', '...k...', '...k...', '...k...', '.kkkkk.'],
+        { y: '#fee761', Y: '#feae34', w: '#ffffff', k: '#262033', K: '#5a6378' },
+      );
+      break;
+    case 'nevera':
+      put(
+        ['.WWWWWWWW.', 'WwwwwwwwwW', 'WwwwwwwkwW', 'WwwwwwwkwW', 'WwwwwwwwwW', 'WWWWWWWWWW', 'WwwwwwwwwW', 'WwwwwwwkwW', 'WwwwwwwkwW', 'WwwwwwwkwW', 'WwwwwwwwwW', 'WwwwwwwwwW', 'WwwwwwwwwW', 'WwwwwwwwwW', 'WwwwwwwwwW', '.WWWWWWWW.'],
+        ['.WWWWWW.', 'WwwwwwwW', 'WwwwwwwW', 'WwwwwwwW', 'WwwwwwwW', 'WWWWWWWW', 'WwwwwwwW', 'WwwwwwwW', 'WwwwwwwW', 'WwwwwwwW', 'WwwwwwwW', 'WwwwwwwW', 'WwwwwwwW', 'WwwwwwwW', 'WwwwwwwW', '.WWWWWW.'],
+        { W: '#a8acb8', w: '#f4f0e8', k: '#5a6378' },
+      );
+      break;
+    case 'lavadora':
+      put(
+        ['WWWWWWWWWW', 'WwkwwwwbwW', 'WWWWWWWWWW', 'WwwBBBBwwW', 'WwBlllbBwW', 'WwBlbbbBwW', 'WwBlbbbBwW', 'WwwBBBBwwW', 'WwwwwwwwwW', 'WWWWWWWWWW'],
+        ['WWWWWWWW', 'WwwwwwwW', 'WWWWWWWW', 'WwwwwwwW', 'WwwwwwwW', 'WwwwwwwW', 'WwwwwwwW', 'WwwwwwwW', 'WwwwwwwW', 'WWWWWWWW'],
+        { W: '#a8acb8', w: '#f4f0e8', k: '#262033', b: '#5ab8e8', B: '#5a6378', l: '#bfe9ff' },
+      );
+      break;
+    case 'cama':
+      put(
+        ['.HHHHHHHHHHHHHH.', '.HhhhhhhhhhhhhH.', '.HwwwwwwwwwwwwH.', '.HwwwwwwwwwwwwH.', 'BBBBBBBBBBBBBBBB', 'BbbbbbbbbbbbbbbB', 'BbbbbbbbbbbbbbbB', 'BbbbbbbbbbbbbbbB', 'BBBBBBBBBBBBBBBB', '.H............H.'],
+        ['H...........', 'Hh..........', 'Hhww........', 'HBBBBBBBBBBB', 'HbbbbbbbbbbB', 'HbbbbbbbbbbB', 'HBBBBBBBBBBB', 'H..........H'],
+        { H: '#7a4a2a', h: '#a8683a', w: '#f4f0e8', B: '#2f5f9a', b: '#5a9ad8' },
+      );
+      break;
+    case 'armario':
+      put(
+        ['HHHHHHHHHHHH', 'HhhhhhHhhhhH', 'HhhhhhHhhhhH', 'HhhhhhHhhhhH', 'HhhhhhHhhhhH', 'HhhhhyHyhhhH', 'HhhhhhHhhhhH', 'HhhhhhHhhhhH', 'HhhhhhHhhhhH', 'HhhhhhHhhhhH', 'HhhhhhHhhhhH', 'HhhhhhHhhhhH', 'HHHHHHHHHHHH', 'H.H......H.H'],
+        ['HHHHHHH', 'HhhhhhH', 'HhhhhhH', 'HhhhhhH', 'HhhhhhH', 'HhhhhhH', 'HhhhhhH', 'HhhhhhH', 'HhhhhhH', 'HhhhhhH', 'HhhhhhH', 'HhhhhhH', 'HHHHHHH', 'H.....H'],
+        { H: '#5a3418', h: '#8a5430', y: '#fee761' },
+      );
+      break;
+    case 'tele':
+      put(
+        ['kkkkkkkkkkkkkk', 'kbbbbbbbbbbbbk', 'kbBbbbbbbbbbbk', 'kbbBbbbbbbbbbk', 'kbbbbbbbbbbbbk', 'kbbbbbbbbbbbbk', 'kkkkkkkkkkkkkk', '.....kkkk.....', 'HHHHHHHHHHHHHH', 'HhhhhhhhhhhhhH', 'H............H'],
+        ['.kkk..', '.kbk..', '.kbk..', '.kbk..', '.kbk..', '.kbk..', '.kkk..', '..kk..', 'HHHHHH', 'HhhhhH', 'H....H'],
+        { k: '#262033', b: '#3a4466', B: '#7cc8ff', H: '#5a3418', h: '#8a5430' },
+      );
+      break;
+    case 'bici':
+      put(
+        ['....kk......kk..', '.....r.....r....', '.....rrrrrrr....', '..ooor....rrooo.', '.o..or...r.o...o', '.o.k.or.r..o.k.o', '.o...o.r...o...o', '..ooo.......ooo.'],
+        ['.kkkkkk.', '...kk...', '...rr...', '...oo...', '...oo...', '...oo...', '...oo...', '...oo...'],
+        { k: '#262033', r: '#d8222c', o: '#3a3848' },
+      );
+      break;
   }
   g.outline(O);
   return g;

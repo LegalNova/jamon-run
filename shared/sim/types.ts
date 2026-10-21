@@ -96,6 +96,10 @@ export type SimEvent =
   | { t: 'streak'; id: number; n: number }
   | { t: 'metro'; id: number; x0: number; y0: number; x1: number; y1: number }
   | { t: 'wind'; on: boolean; dx: number }
+  /** Las Vegas: premio gordo en una tragaperras. */
+  | { t: 'jackpot'; x: number; y: number }
+  /** La casa: alguien ha pulsado un interruptor. */
+  | { t: 'light'; id: number; r: number; on: boolean }
   // --- modos
   | { t: 'infect'; v: number; a: number }
   | { t: 'last'; id: number }
@@ -138,7 +142,7 @@ export interface SimCtx {
   matchTime: number;
   canMove(c: { team: Team }): boolean;
   inSmoke(x: number, y: number): boolean;
-  /** Viento (Ceuta): empuje en px/s. */
+  /** Empuje global en px/s (ahora siempre 0). */
   wind: { x: number; y: number };
   emit(e: SimEvent): void;
   /** Modo de juego y estado que afecta al movimiento (lo comparten Sim y la predicción). */

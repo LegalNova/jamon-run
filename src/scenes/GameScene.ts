@@ -27,6 +27,7 @@ import type { MgHost } from './MinigameScene';
 import { PERKS } from '../../shared/minigames';
 import { COSMETICS, Equipped } from '../../shared/economy';
 import { GameMap } from '../world/GameMap';
+import { updateDoors } from '../../shared/house';
 import { viewSize } from './common';
 
 export interface GameData {
@@ -42,7 +43,8 @@ export function outfitFor(mode: ModeId, style: BiomeId, team: Team): Outfit {
   if (mode === 'bomba') return 'casual';
   if (mode === 'infeccion') return team === 'chaser' ? 'zombie' : 'guchi';
   if (team === 'escapist') return 'guchi';
-  return style === 'paris' ? 'police' : style === 'ceuta' ? 'military' : style === 'barcelona' ? 'street' : 'blue';
+  // Las Vegas: seguridad del casino (mismo uniforme que la policía de París).
+  return style === 'paris' || style === 'vegas' ? 'police' : style === 'ceuta' ? 'military' : style === 'barcelona' ? 'street' : 'blue';
 }
 
 const HINT_SFX = ['hintWhistle', 'hintGiggle', 'hintOink', 'hintSqueak'] as const;
@@ -142,6 +144,7 @@ export class GameScene extends Phaser.Scene {
 
     const style = styleOf(this.model.mapId);
     this.map = new GameMap(this, style, this.model.grid);
+    this.map.addFountain();
     this.fx = new Fx(this, style);
     this.createAmbient();
     const mode = this.model.mode;
@@ -163,7 +166,7 @@ export class GameScene extends Phaser.Scene {
     this.scale.on(Phaser.Scale.Events.RESIZE, this.onResize, this);
 
     audio.setTempo(1);
-    audio.playMusic('game');
+    audio.playMusic(this.track());
     this.scene.launch('UI');
     this.scene.bringToTop('UI');
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.cleanup());
@@ -234,8 +237,10 @@ export class GameScene extends Phaser.Scene {
             ? { x: { min: -20, max: 1000 }, y: -6, lifespan: 1400, speedY: { min: 220, max: 300 }, speedX: { min: -30, max: -20 }, scaleX: 1, scaleY: { min: 2, max: 4 }, alpha: { min: 0.25, max: 0.5 }, frequency: 25, tint: 0xb8c7e0 }
             : id === 'barcelona'
               ? { x: { min: 0, max: 1000 }, y: { min: 0, max: 600 }, lifespan: 2500, speedY: { min: -8, max: -2 }, scale: { start: 1.5, end: 0 }, alpha: { start: 0.8, end: 0 }, frequency: 160, tint: [0xfee761, 0xffffff] }
-              : id === 'ceuta'
-                ? { x: 1010, y: { min: 0, max: 600 }, lifespan: 5000, speedX: { min: -90, max: -50 }, speedY: { min: -4, max: 4 }, scale: { min: 1, max: 2 }, alpha: { start: 0.5, end: 0 }, frequency: 140, tint: [0xffffff, 0xdff3ff] }
+              : id === 'vegas'
+                ? { x: { min: 0, max: 1000 }, y: { min: 0, max: 600 }, lifespan: 1600, speedY: { min: -6, max: 6 }, speedX: { min: -6, max: 6 }, scale: { start: 1.5, end: 0 }, alpha: { start: 0.9, end: 0 }, frequency: 90, tint: [0xff4fd8, 0x3ff0ff, 0xfee761, 0xb26bff] }
+                : id === 'casa'
+                  ? { x: { min: 0, max: 1000 }, y: { min: 0, max: 600 }, lifespan: 5000, speedY: { min: -3, max: 3 }, speedX: { min: 2, max: 6 }, scale: 1, alpha: { start: 0.5, end: 0 }, frequency: 220, tint: [0xf4f0e8, 0xd9cfb8] }
           : { x: { min: 0, max: 1000 }, y: -6, lifespan: 7000, speedY: { min: 10, max: 22 }, speedX: { min: -16, max: 16 }, rotate: { min: 0, max: 360 }, scale: 1, alpha: { min: 0.7, max: 1 }, frequency: 350, tint: [0x63c74d, 0xfeae34, 0x3e8948] };
     // Sigue a la vista de la cámara (en coordenadas del mundo).
     this.ambient = this.add.particles(0, 0, id === 'forest' ? 'p_leaf' : 'p_dot', cfg).setDepth(9800);
@@ -508,16 +513,23 @@ export class GameScene extends Phaser.Scene {
           fx.smokePuff(e.x1, e.y1 - 4, 5);
           fx.ring(e.x1, e.y1 - 6, 0xf2c230, 22);
         }
-        if (e.id === me.id) this.events.emit('feed', '¡METRO! APARECES EN OTRA ESTACIÓN', 0xf2c230);
+        if (e.id === me.id) this.events.emit('feed', styleOf(m.mapId) === 'vegas' ? '¡ASCENSOR! CAMBIAS DE PLANTA DEL PARKING' : '¡METRO! APARECES EN OTRA ESTACIÓN', 0xf2c230);
         break;
       }
-      case 'wind':
-        if (e.on) {
-          audio.play('smoke');
-          this.events.emit('announce', e.dx < 0 ? '¡LEVANTE! EL VIENTO EMPUJA AL OESTE' : '¡PONIENTE! EL VIENTO EMPUJA AL ESTE', 0xdff3ff, false);
-          this.ambient.setFrequency(20);
-        } else this.ambient.setFrequency(140);
+      case 'jackpot':
+        if (this.near(e.x, e.y)) {
+          audio.play('jackpot');
+          fx.ring(e.x, e.y - 12, 0xfee761, 34);
+          fx.ring(e.x, e.y - 12, 0xff4fd8, 22);
+          this.events.emit('feed', '¡PREMIO GORDO EN UNA TRAGAPERRAS!', 0xfee761);
+        }
         break;
+      case 'light': {
+        const c = this.charOf(e.id);
+        if (c && this.near(c.x, c.y)) audio.play('click');
+        if (e.id === me.id) this.events.emit('feed', e.on ? 'LUZ ENCENDIDA' : 'LUZ APAGADA', e.on ? 0xfee761 : 0x8b9bb4);
+        break;
+      }
       case 'ko': {
         // Se acabó el tiempo atrapado: fuera de la partida.
         const v = this.charOf(e.v);
@@ -742,7 +754,7 @@ export class GameScene extends Phaser.Scene {
         audio.playMusic(null);
         break;
       case 'resume': {
-        audio.playMusic('game');
+        audio.playMusic(this.track());
         const perk = PERKS.find((p) => p.id === me.perk);
         this.events.emit('announce', perk ? `¡VENTAJA: ${perk.name}!` : '¡SEGUIMOS!', perk ? 0x63c74d : 0xfee761, true);
         if (perk) fx.ring(me.x, me.y - 8, 0x63c74d, 40);
@@ -790,10 +802,21 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  /** Música de la partida (Las Vegas tiene la suya). */
+  private track(): 'game' | 'vegas' {
+    return styleOf(this.model.mapId) === 'vegas' ? 'vegas' : 'game';
+  }
+
   private render(dt: number): void {
     const m = this.model;
     const viewer = this.player;
     const ms = m.modeNet();
+    // La casa: las puertas se abren al acercarse alguien y los interruptores muestran la luz.
+    if (m.grid.doorTiles.length) {
+      updateDoors(m.grid, m.chars);
+      this.map.syncDoors();
+      this.map.syncLights(ms.lt);
+    }
     for (const c of m.chars) {
       let hidden = false;
       // En Jamón Bomba no hay equipos: todos son "enemigos".

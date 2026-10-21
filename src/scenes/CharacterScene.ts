@@ -20,8 +20,8 @@ const OUTFIT_NAMES: Record<Outfit, string> = {
   casual: 'TU ROPA',
   guchi: 'ROJO GUCHI',
   blue: 'AZUL',
-  police: 'POLICÍA (PARÍS)',
-  military: 'MILITAR (CEUTA)',
+  police: 'POLICÍA (PARÍS Y LAS VEGAS)',
+  military: 'MILITAR',
   street: 'CALLE (BCN)',
   zombie: 'ZOMBI',
 };

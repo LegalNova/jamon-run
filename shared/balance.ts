@@ -291,10 +291,22 @@ export const CITY = {
   metroCooldown: 3,
   /** Barcelona: multiplicador de velocidad en el carril bici. */
   laneMultiplier: 1.35,
-  /** Ceuta: ráfagas de levante que empujan a todos hacia el oeste. */
-  levante: { firstAt: 14, interval: 22, duration: 4.5, force: 42 },
+  /** Las Vegas: cada cierto tiempo una tragaperras da el premio gordo y suelta monedas. */
+  jackpot: { firstAt: 12, interval: 15, coins: 4 },
   /** Ventana (s) para encadenar pilladas ("¡DOBLE PILLADA!"). */
   streakWindow: 7,
+} as const;
+
+/** La casa del Escondite: puertas automáticas e interruptores de luz. */
+export const HOUSE = {
+  /** Distancia (px) a la que una puerta se abre sola. */
+  doorRadius: 22,
+  /** Probabilidad de que una habitación empiece con la luz apagada. */
+  darkChance: 0.5,
+  /** En una habitación a oscuras, los bots buscadores solo ven a esta distancia (px). */
+  darkSight: 36,
+  /** Radio (px) de la luz de una lámpara. */
+  lampLight: 34,
 } as const;
 
 /** Valores de cada modo de juego. */

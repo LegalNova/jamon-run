@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { houseLayout, lightOn } from '../../shared/house';
 import { BALANCE, HYPE, MODES, PHRASES, TILE } from '../config/balance';
 import { keyName, settings } from '../config/settings';
 import { audio } from '../core/audio';
@@ -78,6 +79,8 @@ export class UIScene extends Phaser.Scene {
   private dark: Phaser.GameObjects.RenderTexture | null = null;
   private lightRound!: Phaser.GameObjects.Image;
   private lightCone!: Phaser.GameObjects.Image;
+  /** La casa: habitaciones con la luz encendida (se borran de la oscuridad). */
+  private roomLight: Phaser.GameObjects.Graphics | null = null;
   private bombWarn!: Phaser.GameObjects.BitmapText;
   private fuseT = 0;
   private lastTempo = 1;
@@ -100,6 +103,7 @@ export class UIScene extends Phaser.Scene {
     this.wheel = null;
     this.wheelOpen = false;
     this.dark = null;
+    this.roomLight = null;
     this.mode = this.game_.model.mode;
     const info = modeInfo(this.mode);
     const chaser = this.team === 'chaser';
@@ -120,6 +124,7 @@ export class UIScene extends Phaser.Scene {
       this.dark = this.add.renderTexture(0, 0, W, H).setOrigin(0).setDepth(-50);
       this.lightRound = this.make.image({ key: 'light_round', add: false });
       this.lightCone = this.make.image({ key: 'light_cone', add: false }).setOrigin(0, 0.5);
+      this.roomLight = houseLayout(this.game_.model.grid) ? this.make.graphics({}, false) : null;
     }
     this.vignette = this.add.graphics();
     this.g = this.add.graphics();
@@ -581,6 +586,24 @@ export class UIScene extends Phaser.Scene {
       L.setPosition(sx, sy).setScale(r / 64);
       rt.erase(L);
     };
+    // La casa: las habitaciones con la luz encendida se ven (casi) como de día.
+    const house = this.roomLight ? houseLayout(model.grid) : null;
+    if (house && this.roomLight) {
+      const g = this.roomLight.clear().fillStyle(0xffffff, 1);
+      const lt = model.modeNet().lt;
+      const T = 16;
+      house.rooms.forEach((room, ri) => {
+        if (!lightOn(lt, ri)) return;
+        for (const [x, y, w, h] of room.rects) {
+          const sx = x * T - v.x;
+          const sy = y * T - v.y;
+          if (sx > this.W || sy > this.H || sx + w * T < 0 || sy + h * T < 0) continue;
+          // Un poco más grande para que se vean también las paredes de la habitación.
+          g.fillRect(sx - 4, sy - 10, w * T + 8, h * T + 14);
+        }
+      });
+      rt.erase(g);
+    }
     // farolas del mapa (objetos de verdad)
     for (const pr of model.props) if (pr.k === 1) put(pr.x, pr.y - 14, 38);
     for (const c of model.chars) {

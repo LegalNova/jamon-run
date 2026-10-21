@@ -22,6 +22,8 @@ export interface ModeNet {
   ft: number;
   /** Escondite: segundos hasta la siguiente pista. */
   nh: number;
+  /** La casa: luces encendidas por habitación (bits). */
+  lt?: number[];
 }
 
 export const emptyModeNet = (): ModeNet => ({ ph: 1, pt: 0, r: 0, b: [], pg: [], n: 0, tot: 0, fx: '', ft: 0, nh: 0 });

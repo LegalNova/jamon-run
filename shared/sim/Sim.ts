@@ -1,9 +1,10 @@
-import { AIParams, BALANCE, CITY, Difficulty, HYPE, MODES, PARON, ParonLevel, PHRASES, TILE } from '../balance';
+import { AIParams, BALANCE, CITY, Difficulty, HOUSE, HYPE, MODES, PARON, ParonLevel, PHRASES, TILE } from '../balance';
 import { resolveCircle } from '../collision';
-import { DistField, Grid, SHOT_BLOCKERS, Terrain } from '../grid';
-import { MapId } from '../maps';
+import { DistField, Grid, Terrain } from '../grid';
+import { MapId, styleOf } from '../maps';
+import { houseLayout, HouseLayout, packLights, updateDoors } from '../house';
 import { buildRows, MapScale } from '../mapScale';
-import { abilityFor, canMoveFor, createMode, emptyModeNet, GameMode, ModeNet, speedMulFor } from '../modes';
+import { abilityFor, canMoveFor, createMode, emptyModeNet, GameMode, ModeNet, modeInfo, speedMulFor } from '../modes';
 import { buildProps, Prop } from '../props';
 import { BotBrain, BotWorld } from './Bot';
 import { SimChar, wrapAngle, PRESS_BUFFER } from './Char';
@@ -149,11 +150,16 @@ export class Sim implements SimCtx, BotWorld {
   private danger: DistField | null = null;
   private dangerTimer = 0;
   private released = false;
-  /** Viento de levante (solo Ceuta). */
+  /** Empuje global (sin uso ahora mismo: era el levante de Ceuta). */
   wind = { x: 0, y: 0 };
-  private windTimer: number = CITY.levante.firstAt;
-  private windOn = false;
-  private windDir = -1;
+  /** Las Vegas: tragaperras y cuándo toca el próximo premio gordo. */
+  private slots: number[] = [];
+  private jackpotTimer: number = CITY.jackpot.firstAt;
+  /** La casa: habitaciones, luces (1 = encendida) e interruptor que pisa cada uno. */
+  readonly house: HouseLayout | null;
+  lights: Uint8Array = new Uint8Array(0);
+  private onSwitch = new Map<number, number>();
+  private readonly night: boolean;
   private streaks = new Map<number, { t: number; n: number }>();
   private barriers: { tiles: number[]; t: number }[] = [];
 
@@ -168,6 +174,13 @@ export class Sim implements SimCtx, BotWorld {
     this.duration = this.mode === 'bomba' ? 600 : o.duration;
     this.timeLeft = this.duration;
     this.props = this.mode === 'escondite' ? buildProps(this.grid, this.seed) : [];
+    this.night = modeInfo(this.mode).night;
+    this.house = houseLayout(this.grid);
+    if (this.house) {
+      // Algunas habitaciones empiezan a oscuras (los buscadores pueden encender la luz).
+      this.lights = new Uint8Array(this.house.rooms.length).map(() => (Math.random() < HOUSE.darkChance ? 0 : 1));
+    }
+    if (styleOf(this.mapId) === 'vegas') this.slots = this.grid.passable.length ? this.findSlots() : [];
     this.modeImpl = createMode(this.mode);
     const level: ParonLevel = o.paron === false ? 'no' : o.paron === true || o.paron === undefined ? 'normal' : o.paron;
     this.schedule = buildSchedule(this.mode, this.duration, level, Math.random);
@@ -178,6 +191,19 @@ export class Sim implements SimCtx, BotWorld {
 
   random(): number {
     return Math.random();
+  }
+
+  private findSlots(): number[] {
+    const out: number[] = [];
+    for (let y = 0; y < this.grid.h; y++) for (let x = 0; x < this.grid.w; x++) if (this.grid.chars[y][x] === 'Y') out.push(y * this.grid.w + x);
+    return out;
+  }
+
+  /** ¿Está a oscuras el sitio (habitación con la luz apagada)? */
+  isDark(x: number, y: number): boolean {
+    if (!this.house) return false;
+    const r = this.house.roomOf[this.grid.tileOf(x, y)];
+    return r >= 0 && !this.lights[r];
   }
 
   isHunter(c: SimChar): boolean {
@@ -367,6 +393,7 @@ export class Sim implements SimCtx, BotWorld {
     this.modeImpl.net(this, out);
     out.fx = this.hype.effect;
     out.ft = Math.max(0, Math.ceil(this.hype.effectLeft));
+    if (this.house) out.lt = packLights(this.lights);
     return out;
   }
 
@@ -422,6 +449,7 @@ export class Sim implements SimCtx, BotWorld {
     const d = Math.hypot(target.x - viewer.x, target.y - viewer.y);
     if (target.inBush && d > BALANCE.terrain.bushRevealDistance && target.speedNow < 60) return false;
     if (this.inSmoke(target.x, target.y) && d > 18) return false;
+    if (this.night && d > HOUSE.darkSight && this.isDark(target.x, target.y)) return false;
     return true;
   }
 
@@ -531,6 +559,8 @@ export class Sim implements SimCtx, BotWorld {
       c.update(dt, this, it);
     }
     this.separate();
+    updateDoors(this.grid, this.chars);
+    if (this.state === 'play') this.updateSwitches();
     this.updateProjectiles(dt);
     for (const s of this.smokes) {
       s.life -= dt;
@@ -600,8 +630,7 @@ export class Sim implements SimCtx, BotWorld {
         p.x += (p.dx * step) / n;
         p.y += (p.dy * step) / n;
         p.travelled += step / n;
-        const ch = this.grid.charAt(Math.floor(p.x / TILE), Math.floor(p.y / TILE));
-        if (SHOT_BLOCKERS.includes(ch)) {
+        if (this.grid.blocksShot(Math.floor(p.x / TILE), Math.floor(p.y / TILE))) {
           this.endProjectile(p, true);
           break;
         }
@@ -764,22 +793,60 @@ export class Sim implements SimCtx, BotWorld {
         this.emit({ t: 'metro', id: c.id, x0: Math.round(x0), y0: Math.round(y0), x1: Math.round(c.x), y1: Math.round(c.y) });
       }
     }
-    if (this.mapId === 'ceuta') {
-      const L = CITY.levante;
-      this.windTimer -= dt;
-      if (!this.windOn && this.windTimer <= 0) {
-        this.windOn = true;
-        this.windTimer = L.duration;
-        this.windDir = Math.random() < 0.8 ? -1 : 1; // el levante sopla hacia el oeste
-        this.emit({ t: 'wind', on: true, dx: this.windDir });
-      } else if (this.windOn && this.windTimer <= 0) {
-        this.windOn = false;
-        this.windTimer = L.interval;
-        this.emit({ t: 'wind', on: false, dx: 0 });
+    if (this.slots.length) {
+      this.jackpotTimer -= dt;
+      if (this.jackpotTimer <= 0) {
+        this.jackpotTimer = CITY.jackpot.interval * (0.8 + Math.random() * 0.4);
+        this.jackpot();
       }
-      const target = this.windOn ? this.windDir * L.force : 0;
-      this.wind.x += (target - this.wind.x) * Math.min(1, dt * 2);
-      this.wind.y = this.windOn ? Math.sin(this.matchTime * 3) * 6 : 0;
+    }
+  }
+
+  /** Las Vegas: una tragaperras da el premio gordo y suelta monedas a su alrededor. */
+  private jackpot(): void {
+    const g = this.grid;
+    const used = new Set(this.pickups.map((p) => p.spawnIndex));
+    // Mejor una cerca de alguien vivo, para que se vea.
+    const alive = this.chars.filter((c) => c.alive);
+    const who = alive[Math.floor(Math.random() * alive.length)];
+    const pool = who ? [...this.slots].sort((a, b) => this.distTo(a, who) - this.distTo(b, who)).slice(0, 4) : this.slots;
+    const slot = pool[Math.floor(Math.random() * pool.length)];
+    const sx = slot % g.w;
+    const sy = (slot / g.w) | 0;
+    const free: number[] = [];
+    for (let dy = -2; dy <= 2; dy++)
+      for (let dx = -2; dx <= 2; dx++) {
+        const t = g.idx(sx + dx, sy + dy);
+        if (g.walkable(sx + dx, sy + dy) && g.terrain[t] !== Terrain.Water && !used.has(t)) free.push(t);
+      }
+    for (let n = 0; n < CITY.jackpot.coins && free.length; n++) this.spawnPickup('coin', free.splice(Math.floor(Math.random() * free.length), 1)[0]);
+    const c = g.tileCenter(slot);
+    this.emit({ t: 'jackpot', x: c.x, y: c.y });
+  }
+
+  private distTo(t: number, c: { x: number; y: number }): number {
+    const p = this.grid.tileCenter(t);
+    return Math.hypot(p.x - c.x, p.y - c.y);
+  }
+
+  /** La casa: al pisar un interruptor se enciende o se apaga la luz de su habitación. */
+  private updateSwitches(): void {
+    const h = this.house;
+    if (!h) return;
+    for (const c of this.chars) {
+      const t = this.grid.tileOf(c.x, c.y);
+      const on = c.alive && this.grid.chars[(t / this.grid.w) | 0][t % this.grid.w] === 'J' ? t : -1;
+      if (this.onSwitch.get(c.id) === on) continue;
+      this.onSwitch.set(c.id, on);
+      if (on < 0) continue;
+      // En el Escondite solo los buscadores tocan la luz.
+      if (this.mode === 'escondite' && c.team !== 'chaser') continue;
+      const r = h.roomOf[on];
+      if (r < 0) continue;
+      // Los bots solo encienden (apagar no les sirve de nada).
+      if (!c.human && this.lights[r]) continue;
+      this.lights[r] = this.lights[r] ? 0 : 1;
+      this.emit({ t: 'light', id: c.id, r, on: this.lights[r] === 1 });
     }
   }
 

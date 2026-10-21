@@ -46,6 +46,13 @@ const CHAR_TERRAIN: Record<string, Terrain> = {
   k: Terrain.Lane,
   /** Barrera temporal (Infección). */
   B: Terrain.Solid,
+  // Las Vegas
+  N: Terrain.Solid,
+  Y: Terrain.Solid,
+  V: Terrain.Solid,
+  I: Terrain.Solid,
+  // La casa
+  K: Terrain.Solid,
 };
 
 const MOVE_COST: Record<number, number> = {
@@ -60,9 +67,9 @@ const MOVE_COST: Record<number, number> = {
 };
 
 /** Tiles que tapan la vista (los arbustos, el agua y las terrazas no). */
-export const SIGHT_BLOCKERS = '#TRHnLPSWC';
+export const SIGHT_BLOCKERS = '#TRHnLPSWCNI';
 /** Tiles que paran un jamón lanzado. */
-export const SHOT_BLOCKERS = '#TRHnrLPSWCcgB';
+export const SHOT_BLOCKERS = '#TRHnrLPSWCcgBNYVIK';
 
 const DIRS = [
   [1, 0, 1],
@@ -139,12 +146,16 @@ export class Grid {
   readonly escapistSpawns: number[] = [];
   readonly itemSpawns: number[] = [];
   readonly metroTiles: number[] = [];
+  /** Puertas de la casa (se abren solas; cerradas tapan la vista y paran los jamones). */
+  readonly doorTiles: number[] = [];
+  readonly doorClosed: Uint8Array;
 
   constructor(rows: string[]) {
     this.h = rows.length;
     this.w = rows[0].length;
     this.chars = rows.map((r) => r.split(''));
     this.terrain = new Uint8Array(this.w * this.h);
+    this.doorClosed = new Uint8Array(this.w * this.h);
     for (let y = 0; y < this.h; y++) {
       for (let x = 0; x < this.w; x++) {
         const c = rows[y][x] ?? '#';
@@ -156,6 +167,10 @@ export class Grid {
         if (c === 'E') this.escapistSpawns.push(i);
         if (c === 'o') this.itemSpawns.push(i);
         if (c === 'M') this.metroTiles.push(i);
+        if (c === 'D') {
+          this.doorTiles.push(i);
+          this.doorClosed[i] = 1;
+        }
       }
     }
     this.openness = new Float32Array(this.w * this.h);
@@ -238,7 +253,16 @@ export class Grid {
   blocksSight(tx: number, ty: number): boolean {
     if (!this.inBounds(tx, ty)) return true;
     const c = this.chars[ty][tx];
+    if (c === 'D') return this.doorClosed[ty * this.w + tx] === 1;
     return SIGHT_BLOCKERS.includes(c);
+  }
+
+  /** ¿Este tile para un jamón lanzado? */
+  blocksShot(tx: number, ty: number): boolean {
+    if (!this.inBounds(tx, ty)) return true;
+    const c = this.chars[ty][tx];
+    if (c === 'D') return this.doorClosed[ty * this.w + tx] === 1;
+    return SHOT_BLOCKERS.includes(c);
   }
 
   tileCenter(i: number): { x: number; y: number } {

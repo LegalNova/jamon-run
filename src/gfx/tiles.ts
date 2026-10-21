@@ -5,6 +5,8 @@ import { Grid } from '../world/grid';
 import { PAL } from './palette';
 import { gridTexture, makeCanvas, PixelGrid, rng } from './pixel';
 import { buildCityProps, CITY_BIOMES, drawCityTile } from './cityTiles';
+import { buildHouseProps, drawHouseTile } from './houseTiles';
+import { buildVegasProps, drawVegasTile } from './vegasTiles';
 
 // ------------------------------------------------------------------ utilidades de color
 
@@ -80,6 +82,8 @@ const BIOMES: Record<BiomeId, Biome> = {
     rockDark: '#4a5776',
   },
   ...CITY_BIOMES,
+  vegas: { base: '#262131', dark: '#221d2c', light: '#2c2638', detail: '#3a2f48', sparkle: ['#fee761'], rockTop: '#a8a6b8', rockMid: '#8a889a', rockFace: '#6e6c80', rockDark: '#3a3848' },
+  casa: { base: '#b07a4a', dark: '#a06c40', light: '#bd8754', detail: '#7a4a2a', sparkle: ['#f4f0e8'], rockTop: '#8a8494', rockMid: '#6e6878', rockFace: '#4a3a4a', rockDark: '#2e222e' },
 };
 
 // ------------------------------------------------------------------ dibujo de tiles
@@ -395,6 +399,7 @@ export function drawTreeBase(t: TileCtx): void {
 }
 
 function drawTile(t: TileCtx): void {
+  if (drawVegasTile(t, drawWater) || drawHouseTile(t)) return;
   if (drawCityTile(t, drawWater, drawSmallRock)) return;
   const c = t.grid.charAt(t.tx, t.ty);
   switch (c) {
@@ -661,6 +666,8 @@ export function buildPropTextures(scene: Phaser.Scene): void {
   buildPine(scene, 'pine0', 5);
   buildPine(scene, 'pine1', 9);
   buildCityProps(scene);
+  buildVegasProps(scene);
+  buildHouseProps(scene);
 }
 
 // ------------------------------------------------------------------ minimapa / previsualización
@@ -671,6 +678,8 @@ const MINI_COLORS: Record<BiomeId, Record<string, string>> = {
   snow: { '.': '#eaf1fb', '#': '#6f7f9e', T: '#265c42', n: '#b8c7e0', H: '#a22633', i: '#7cc8e8', d: '#d0dcf0', r: '#8b9bb4' },
   paris: { '.': '#a9a49b', '#': '#7f8ea3', T: '#3e8948', ',': '#4f9a45', '~': '#4d7f8a', '=': '#bdb7ad', c: '#d8222c', M: '#2f6b4f', L: '#6e4f36', P: '#a9cfe0', b: '#2f8a3c' },
   barcelona: { '.': '#bdb7ad', '#': '#d8b48a', T: '#3e8948', S: '#cdb98f', g: '#3f8fd8', k: '#3a9d63', s: '#efd9a0', '~': '#2f7fd1', b: '#2f8a3c' },
+  vegas: { '.': '#2c2638', ',': '#553c6d', N: '#ff4fd8', Y: '#fee761', V: '#3ff0ff', z: '#524f66', I: '#a8a6b8', M: '#c9a04a', T: '#3e8948', '~': '#2f7fd1' },
+  casa: { '.': '#b07a4a', f: '#b07a4a', '#': '#2e222e', u: '#c8dcea', p: '#8a8a92', v: '#5e586a', a: '#7a5a3e', y: '#e0b880', D: '#fee761', J: '#f4f0e8', c: '#6a4228', K: '#c2c3c7', V: '#d8222c' },
   ceuta: { '.': '#efe6d2', '#': '#c9a46b', W: '#f6f4ee', T: '#3e8948', ',': '#4f9a45', '~': '#2f7fd1', '=': '#bdb7ad', s: '#efd9a0', C: '#7a5a34', r: '#8b9bb4', b: '#2f8a3c' },
 };
 
