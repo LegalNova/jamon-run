@@ -445,6 +445,8 @@ export const PARON = {
   doubleChance: 0.2,
   /** Eventos aparte (como mucho uno de cada por partida): probabilidad de que salgan. */
   eventChance: { ruleta: 0.65, carrera: 0.5 },
+  /** Multiplicador de la probabilidad de eventos según lo que elija el anfitrión. */
+  eventScale: { no: 0, pocos: 0.4, normal: 1, muchos: 1.5 },
   phases: { break: 1.5, slot: 2.4, howto: 2, podium: 4, podiumQuick: 2.2, count: 3 },
   /** Ventajas para lo que queda de partida: +10% velocidad, escudo, recarga un 20% más rápida. */
   perkSpeed: 1.1,

@@ -90,8 +90,10 @@ export function buildSchedule(mode: ModeId, duration: number, level: ParonLevel,
   }
   const minis = Math.min(n, slots);
   const kinds: ParonSlot['kind'][] = Array(minis).fill('mini');
-  if (kinds.length < slots && rng() < PARON.eventChance.ruleta) kinds.push('ruleta');
-  if (kinds.length < slots && rng() < PARON.eventChance.carrera) kinds.push('carrera');
+  // Los eventos van aparte, pero "pocos" también los hace más raros y "muchos" más frecuentes.
+  const ev = PARON.eventScale[level];
+  if (kinds.length < slots && rng() < PARON.eventChance.ruleta * ev) kinds.push('ruleta');
+  if (kinds.length < slots && rng() < PARON.eventChance.carrera * ev) kinds.push('carrera');
   // Orden al azar (pero el primero, mejor un minijuego).
   for (let i = kinds.length - 1; i > 1; i--) {
     const j = 1 + Math.floor(rng() * i);
