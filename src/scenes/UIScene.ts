@@ -208,8 +208,6 @@ export class UIScene extends Phaser.Scene {
     };
     const onCoin = (n: number, combo: number) => this.hype.addCoins(n, combo);
     const onRoulette = (kind: 'global' | 'me', r: number, title: string) => this.hype.roulette(kind, r, title);
-    const onRace = (w: number) => this.hype.startRace(w, this.game_.player.horse);
-    const onRaceEnd = (w: number) => this.hype.endRace(w, this.game_.player.horse === w);
     const onMedal = (m: string) => this.hype.medal(m);
     const onBurst = (n: number) => this.hype.burst(this.W / 2, this.H / 2, n);
     const handlers: [string, (...a: never[]) => void][] = [
@@ -221,8 +219,6 @@ export class UIScene extends Phaser.Scene {
       ['flash', onFlash],
       ['coin', onCoin],
       ['roulette', onRoulette],
-      ['race', onRace],
-      ['raceEnd', onRaceEnd],
       ['medal', onMedal],
       ['burst', onBurst],
     ];

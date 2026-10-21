@@ -48,6 +48,19 @@ class InputManager {
   private queued = new Set<string>();
   private pressed = new Set<string>();
   private padDown = new Set<number>();
+
+  /** Vibración del mando (si hay uno y se permite). */
+  rumble(strength: number, ms: number): void {
+    if (!settings.rumble) return;
+    try {
+      for (const p of navigator.getGamepads?.() ?? []) {
+        const act = (p as unknown as { vibrationActuator?: { playEffect(t: string, o: object): Promise<unknown> } } | null)?.vibrationActuator;
+        void act?.playEffect('dual-rumble', { duration: ms, strongMagnitude: Math.min(1, strength), weakMagnitude: Math.min(1, strength * 0.7) }).catch(() => undefined);
+      }
+    } catch {
+      /* sin vibración */
+    }
+  }
   private padPrev = new Set<number>();
   private padAxes = { x: 0, y: 0 };
   private navHeld: Record<NavDir, number> = { up: -1, down: -1, left: -1, right: -1 };

@@ -1,4 +1,4 @@
-import { BALANCE, CITY, RESCUE } from '../balance';
+import { BALANCE, CITY, PARON, RESCUE } from '../balance';
 import { clampToMap, moveCircle } from '../collision';
 import { Terrain } from '../grid';
 import type { Look } from '../look';
@@ -97,7 +97,6 @@ export class SimChar {
   perk: 'speed' | 'shield' | 'cooldown' | null = null;
   /** Tiradas personales de la ruleta que le quedan y caballo al que apostó. */
   spinsLeft = 0;
-  horse = 0;
 
   stats: Stats = emptyStats();
   deathTime = -1;
@@ -172,13 +171,15 @@ export class SimChar {
     }
 
     // temporizadores
-    this.attackCd -= dt;
-    this.dashCd -= dt;
+    // Ventaja "recarga rápida" del Parón.
+    const cd = this.perk === 'cooldown' ? dt / PARON.perkCooldown : dt;
+    this.attackCd -= cd;
+    this.dashCd -= cd;
     this.passCd -= dt;
     this.invisible -= dt;
     this.dashFree -= dt;
     if (this.dashFree > 0) this.dashCd = Math.min(this.dashCd, 0);
-    this.specialCd -= dt;
+    this.specialCd -= cd;
     this.stun -= dt;
     this.invuln -= dt;
     this.bootTime -= dt;
@@ -220,7 +221,7 @@ export class SimChar {
     const T = B.terrain;
     const asChaser = this.chaserStats(ctx);
     const base = asChaser ? B.chaser : B.escapist;
-    let speed = base.speed * (this.human ? 1 : ctx.ai.speedMul) * ctx.speedMul(this);
+    let speed = base.speed * (this.human ? 1 : ctx.ai.speedMul) * ctx.speedMul(this) * (this.perk === 'speed' ? PARON.perkSpeed : 1);
     if (this.terrain === Terrain.Quicksand) speed *= T.quicksandSlow;
     else if (this.terrain === Terrain.DeepSnow) speed *= T.deepSnowSlow;
     if (this.bootTime > 0) speed *= B.items.bootMultiplier;

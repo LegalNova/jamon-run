@@ -1,6 +1,11 @@
 # JAMÓN RUN
 
-Pilla-pilla por equipos en vista cenital, en pixel art, con **4 modos de juego**: Pilla Jamón, Infección, Jamón Bomba y Escondite Jamonero. Se juega solo contra bots o **online con hasta 20 personas**, y todo va cargado de dopamina: monedas con combos, medallas, dos tiradas de la ruleta por partida, tu propia tirada y una carrera de caballos en cada partida.
+Pilla-pilla por equipos en vista cenital, en pixel art, con **4 modos de juego**: Pilla Jamón, Infección, Jamón Bomba y Escondite Jamonero. Se juega solo contra bots o **online con hasta 20 personas**, y todo va cargado de dopamina:
+
+- **Lonchas** (la moneda del juego), misiones diarias y nivel.
+- Una **tienda** de cosméticos.
+- Monedas con combos, medallas y dos tiradas de la ruleta por partida, más tu propia tirada.
+- El **Parón Dopamina**: a mitad de partida todo se congela y toca uno de **8 minijuegos**.
 
 Todo se genera por código: sprites, tiles, fuente, partículas, efectos de sonido, música (Web Audio en estilo 8-bit) y voces (Web Speech). No hay ni un solo asset externo.
 
@@ -16,7 +21,7 @@ Todo se genera por código: sprites, tiles, fuente, partículas, efectos de soni
 2. En la sala pulsa **COPIAR ENLACE** y pásaselo (es la dirección del juego con `?sala=CÓDIGO`). También pueden entrar con **UNIRSE CON CÓDIGO** escribiendo las 5 letras que ves arriba.
 3. Cada uno pulsa **¡ESTOY LISTO!**. Cuando estén todos, el anfitrión (★) pulsa **EMPEZAR PARTIDA**.
 
-El anfitrión elige el **modo** (o deja **VOTACIÓN**: cada uno vota con **TU VOTO** y gana el más votado; si hay empate, al azar), el mapa, cuántos **cazadores** hay al empezar (automático o de 1 a 5), la duración, la dificultad de los bots, si la sala sale en la partida rápida y hasta cuántos personajes se rellena con bots (no, 8, 12, 16 o 20). Cada uno elige también su **caballo** para la carrera. Si a alguien se le corta la conexión, un bot lleva su personaje y lo recupera al volver dentro de 15 segundos.
+El anfitrión elige el **modo** (o deja **VOTACIÓN**: cada uno vota con **TU VOTO** y gana el más votado; si hay empate, al azar), el mapa, cuántos **cazadores** hay al empezar (automático o de 1 a 5), la duración, la dificultad de los bots, si la sala sale en la partida rápida y hasta cuántos personajes se rellena con bots (no, 8, 12, 16 o 20). El anfitrión también puede activar o quitar el **Parón** (minijuego a mitad de partida). En la sala, mientras esperáis, el botón **MINIJUEGO** te deja jugar uno contra bots (si empieza la partida, te lleva a ella). Si a alguien se le corta la conexión, un bot lleva su personaje y lo recupera al volver dentro de 15 segundos.
 
 ¿Sin amigos a mano? **PARTIDA RÁPIDA** te mete en una sala pública con sitio (o crea una).
 
@@ -74,9 +79,98 @@ Electron no está entre las dependencias del proyecto: estos comandos lo bajan c
 
 ---
 
+## Lonchas, nivel, misiones y tienda
+
+- **Lonchas** 🥓: la moneda del juego. Es **solo virtual**: no se compra con dinero real, no se cambia por nada fuera del juego y no hay cajas de botín de pago. Se ganan:
+  - por jugar y por ganar;
+  - por las monedas que consigues en la partida (golpes, rescates, sobrevivir, combos…);
+  - por los minijuegos y por las misiones.
+- **Saldo** arriba a la derecha, con contador animado al ganar o gastar.
+- **Regalo diario:** en **MISIONES**. Da más si vienes días seguidos (hasta 7).
+- **Misiones diarias:** 3 cada día, por ejemplo «Gana 2 minijuegos», «Pasa el jamón bomba 5 veces» o «Sobrevive 60 s». Tienen barra de progreso; cuando se completan, sale un aviso y se recogen con animación.
+- **Nivel y XP:** al subir de nivel hay confeti y sonido, y te llevas un **cosmético gratis**.
+- **Tienda:** con lonchas compras cosméticos que también ven los demás online:
+  - gorros;
+  - rastros de partículas al correr;
+  - efectos de golpe;
+  - marcos de nombre;
+  - emotes (tecla G);
+  - bailes de victoria (en el podio y como MVP).
+- El saldo **nunca baja de 0**. Si te quedas a 0, recibes **lonchas de rescate** (una vez al día).
+- **Todo se guarda en el servidor:** un Durable Object por jugador. El navegador solo pide cosas («compra esto», «recoge el regalo») y el servidor decide.
+  - **Online**, el servidor de la sala calcula lo que ganas: no se puede trucar desde el navegador.
+  - **Offline** (bots y Sala de minijuegos) el resultado lo calcula tu navegador, así que tiene **topes**: por partida, por día y con un tiempo mínimo entre partidas.
+
+## Parón Dopamina
+
+- **Cuándo:** una vez por partida, en un momento al azar entre el **30% y el 70%** del tiempo (en Jamón Bomba, entre los segundos 45 y 110).
+- **La partida se congela para todos a la vez:**
+  - nadie se mueve ni recibe golpes;
+  - el reloj se para, igual que las mechas, las ruletas y los objetos.
+- **Cómo funciona online:** lo decide el servidor, así que todos entran y salen a la vez, sin desincronizar posiciones ni tiempo.
+- **Las fases:**
+  1. La pantalla se rompe en píxeles y sale un **«¡PARÓN!»** gigante con corneta.
+  2. Una **tragaperras** elige el minijuego, con clics que van frenando y un destello al pararse.
+  3. **2 segundos** con el dibujo y las teclas.
+  4. El minijuego, de **10 a 20 s**.
+  5. **Podio** de los 3 primeros bailando.
+  6. **Cuenta atrás 3-2-1** y vuelve la partida.
+- **Recompensas:**
+  - El podio cobra lonchas y XP.
+  - **El ganador elige una ventaja** para lo que queda de partida: +10% de velocidad, escudo de un golpe o recarga un 20% más rápida.
+  - **Rachas:** ganar minijuegos seguidos sube el multiplicador de lonchas (x1.2, x1.5, x2) y te salen llamas en el nombre. Perder la racha no quita nada.
+- **Reacciones:** durante el minijuego y el podio cualquiera puede lanzar 🔥😂😱👏🍖 con las teclas **1-5**; suben flotando en la pantalla de todos.
+- **Configuración:** el anfitrión puede activarlo o quitarlo en la sala. En offline juegan los bots.
+- **Sala de minijuegos:** todos los minijuegos se pueden jugar sueltos desde el menú, en **MINIJUEGOS**.
+
+### Los 8 minijuegos
+
+Todos se juegan con ← →, ESPACIO y E.
+
+1. **Ruleta americana**
+   - 38 casillas: 1-36 rojos y negros con la distribución real, más el 0 y el 00 en verde.
+   - Cada uno empieza con 100 fichas. ← → eliges la apuesta, ESPACIO pone una ficha y E la quita.
+   - Apuestas y pagos:
+     - **rojo**, **negro**, par/impar y 1-18/19-36: 1 a 1;
+     - **verde (0 o 00)**: 17 a 1;
+     - **tu número de la suerte**: 35 a 1.
+   - El servidor saca el número con `crypto.getRandomValues` cuando se cierran las apuestas. La rueda (con su bola rebotando) para justo en ese número: nada de animaciones falsas de «casi».
+   - Croupier con bocadillos e historial de los últimos 10 números.
+   - Gana quien acaba con más fichas. Lo que ganas apostando también se paga en lonchas.
+2. **Carrera de caballos**
+   - 6 caballos: Pata Negra, Ibérico Veloz, Serrano Turbo, Bellota Express, Jamoncito y Loncha Loca.
+   - Cuotas de 2x a 12x, calculadas simulando la carrera 600 veces.
+   - **En el Parón eliges tu caballo ganador** (8 s).
+   - La carrera dura unos 10 s, con adelantamientos y comentarista. Si está ajustada, hay **foto finish** con zoom.
+   - Mientras corre, machacando ESPACIO **animas a tu caballo** y le das un empujoncito, así que no es solo suerte.
+   - Si gana tu caballo, cobras lonchas según la cuota.
+3. **Corta el Jamón**
+   - El cuchillo va y viene. Pulsa cuando pase por la marca para sacar la loncha más fina: PERFECTO, GENIAL, BIEN o GORDA.
+   - 5 cortes, cada vez más rápidos. Gana quien sume más precisión.
+4. **Torre de Lonchas**
+   - La loncha va de lado a lado y cae al pulsar; lo que sobresale se corta y se cae.
+   - La cámara sigue a la torre y la música se acelera.
+   - Gana la torre más alta en 20 s.
+5. **Tira y Afloja**
+   - Azules contra rojos (o mitad y mitad).
+   - Hay que pulsar **al ritmo** del indicador: machacar a lo loco no sirve.
+   - Gana todo el equipo.
+6. **Trilero del Jamón**
+   - 3, luego 4 y luego 5 cubiletes; uno esconde la loncha dorada.
+   - La mezcla es justa: cada cambio se ve tal cual ocurre y se puede seguir con la vista.
+7. **Reflejos Ibéricos**
+   - Espera con tensión y, cuando sale el jamón, ¡pulsa!
+   - Si te adelantas, esa ronda quedas fuera.
+   - Se muestran los milisegundos de cada uno y el más rápido sale en grande.
+8. **Ritmo Jamonero**
+   - Flechas que caen al ritmo de una canción chiptune generada por código. Combos con números grandes.
+   - 15 s; gana quien haga más puntos.
+
+Cada minijuego es un módulo de `shared/minigames/` con la misma interfaz (`input`, `tick`, `state`, `results`, `bot`), así que añadir otro es fácil. Lo ejecutan igual el servidor (online) y el navegador (offline).
+
 ## Modos de juego
 
-Contra bots: **JUGAR CON BOTS → ELIGE MODO** (cuatro tarjetas animadas) → tutorial rápido de 4 viñetas → mapa → ruleta de bando y caballo → ¡a jugar! Los bots juegan los cuatro modos.
+Contra bots: **JUGAR CON BOTS → ELIGE MODO** (cuatro tarjetas animadas) → tutorial rápido de 4 viñetas → mapa → ruleta de bando → ¡a jugar! Los bots juegan los cuatro modos.
 
 ### 1. Pilla Jamón (el clásico)
 
@@ -136,15 +230,15 @@ Los **azules** pillan a jamonazos; los **rojos** huyen y se rescatan entre ellos
   - Dash infinito.
   - Invisibilidad.
   - O el **¡JACKPOT!** (+200).
-- **Carrera de caballos:** antes de cada partida apuestas por un caballo: PATA NEGRA, BELLOTA EXPRESS, LONCHA LOCA o SERRANITO. A mitad de partida se corre la carrera en pantalla y **gana uno al azar**. Si acertaste, +100 monedas y la medalla SUERTUDO.
-- **Medallas:** MVP, INTOCABLE, SALVAVIDAS, CARNICERO, ESCURRIDIZO, LEYENDA, PACIENTE CERO, PATATA CALIENTE, ÚLTIMO EN PIE, CAMALEÓN, OJO DE HALCÓN, FRANCOTIRADOR, JACKPOT, SUERTUDO… Cada una da monedas extra.
+- **Medallas:** MVP, INTOCABLE, SALVAVIDAS, CARNICERO, ESCURRIDIZO, LEYENDA, PACIENTE CERO, PATATA CALIENTE, ÚLTIMO EN PIE, CAMALEÓN, OJO DE HALCÓN, FRANCOTIRADOR, JACKPOT… Cada una da monedas extra.
 - **Al acabar:**
   - Tus monedas suben rodando.
   - Ves tus medallas.
-  - La barra de experiencia se llena; si **subes de nivel**, hay fuegos artificiales.
+  - Las lonchas ganadas suben rodando y la barra de experiencia se llena; si **subes de nivel**, hay fuegos artificiales y un cosmético gratis.
+  - Antes, el **MVP** de la partida sale en una pantalla especial con su baile de victoria.
   - Ves si batiste tu **récord** del modo y el **ranking de la partida** por monedas.
 - **RÉCORDS** (en el menú):
-  - Tus estadísticas por modo (partidas, victorias, récord y monedas). Se guardan en el navegador; las monedas son del juego y no se compran con dinero real.
+  - Tus estadísticas por modo (partidas, victorias, récord y monedas), guardadas en tu perfil del servidor.
   - El **ranking mundial** con las mejores partidas online de cada modo.
 
 ---
@@ -174,6 +268,8 @@ Desde el menú, el menú online o la sala. Puedes cambiar nombre, color, piel, p
 | Girar el disfraz (Escondite) | R | Y |
 | Tirada personal de la ruleta | Q | LT |
 | Rueda de frases | T | Select |
+| Emote (el que tengas puesto) | G | — |
+| Reacciones en el Parón 🔥😂😱👏🍖 | 1 a 5 | — |
 | Pantalla completa | F | — |
 | Pausa | Esc | Start |
 
@@ -254,7 +350,10 @@ Todos los números están en **`shared/balance.ts`**. Lo usan el cliente y el se
 | `CITY` | enfriamiento del metro, velocidad del carril bici, fuerza y frecuencia del levante, ventana de rachas |
 | `PHRASES` / `VOICE` | frases de los bocadillos y de la rueda (también una rueda por modo), probabilidades, tono y velocidad de la voz por equipo |
 | `MODES` | valores de cada modo: duración, velocidad de los infectados, barreras, mecha del jamón bomba, fase de esconderse, pistas, daño, objetos del mapa… |
-| `HYPE` | monedas de cada acción, combos, cuándo gira la ruleta, efectos y premios, carrera de caballos, medallas |
+| `HYPE` | monedas de cada acción, combos, cuándo gira la ruleta, efectos y premios, medallas |
+| `PARON` | cuándo salta el Parón (entre el 30% y el 70%), duración de cada fase, ventajas del ganador |
+| `MG` | pagos de la ruleta, cuotas y apuesta de los caballos, duraciones y dificultad de cada minijuego |
+| `ECONOMY` (`shared/economy.ts`) | lonchas por partida y por minijuego, regalo diario, misiones, rachas, topes offline, XP, catálogo y precios de la tienda |
 
 ### Pruebas útiles
 
@@ -282,9 +381,12 @@ shared/                   código común a cliente y servidor (sin Phaser)
   props.ts                objetos del Escondite (con semilla: iguales en servidor y clientes)
   modes/                  un módulo por modo con la misma interfaz (preparar, reglas, tick,
                           victoria, datos del HUD): pilla, infeccion, bomba, escondite
+  economy.ts              lonchas, nivel, misiones, tienda y cosméticos (lo aplica el servidor)
+  minigames/              Parón Dopamina y los 8 minijuegos (misma interfaz, con bots)
   sim/                    simulación de la partida: personajes, IA de los 4 modos, objetos,
                           Hype.ts (monedas, combos, medallas, ruletas y carrera)
-server/src/               Cloudflare Worker: sala (Durable Object, 20 Hz) y partida rápida
+server/src/               Cloudflare Worker: sala (Durable Object, 20 Hz), partida rápida,
+                          perfil de cada jugador (Durable Object Profile) y /api/me
 src/                      cliente Phaser
   game/                   modelo offline y vistas (personajes, objetos, jamones)
   net/                    conexión, reconexión y modelo online (predicción + interpolación)

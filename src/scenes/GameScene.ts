@@ -22,6 +22,9 @@ import { Fx } from '../gfx/fx';
 import { TEAM_COLORS } from '../gfx/palette';
 import { GLOBAL_LABELS, PRIZE_LABELS } from '../ui/hype';
 import { hitBurst } from '../game/cosmetics';
+import { shake as shakeFx } from '../core/feel';
+import type { MgHost } from './MinigameScene';
+import { PERKS } from '../../shared/minigames';
 import { COSMETICS, Equipped } from '../../shared/economy';
 import { GameMap } from '../world/GameMap';
 import { viewSize } from './common';
@@ -30,8 +33,6 @@ export interface GameData {
   mode?: ModeId;
   mapId?: MapId;
   role?: Team;
-  /** Caballo elegido para la carrera. */
-  horse?: number;
   /** Partida online ya preparada (si no, se crea una partida offline con bots). */
   model?: GameModel;
 }
@@ -58,6 +59,8 @@ export function botCos(): Equipped {
 }
 
 export interface ResultEntry {
+  /** Cosméticos (para el baile del MVP). */
+  cos?: Equipped;
   name: string;
   team: Team;
   isPlayer: boolean;
@@ -71,10 +74,10 @@ export interface ResultsData {
   mapId: MapId;
   role: Team;
   winner: Team;
-  /** Ganador individual (Jamón Bomba / Leyenda) y caballo ganador. */
+  /** Ganador individual (Jamón Bomba / Leyenda). */
   champion: string | null;
-  horse: number;
-  myHorse: number;
+  /** Cómo te fue en el Parón. */
+  paron: { mg: string; place: number; label: string; won: boolean } | null;
   timePlayed: number;
   duration: number;
   entries: ResultEntry[];
@@ -189,14 +192,12 @@ export class GameScene extends Phaser.Scene {
     for (let i = 0; i < nCh; i++) {
       const me = role === 'chaser' && i === playerIndex;
       const name = botName(botI++);
-      const horse = me && this.data_.horse !== undefined ? this.data_.horse : Math.floor(Math.random() * HYPE.horses.length);
-      roster.push({ id: id++, team: 'chaser', name: me ? profile.look.name : name, look: me ? profile.look : randomLook(name), human: me && !this.autotest, horse, cos: me ? myCos : botCos(), streak: me ? myStreak : 0 });
+      roster.push({ id: id++, team: 'chaser', name: me ? profile.look.name : name, look: me ? profile.look : randomLook(name), human: me && !this.autotest, cos: me ? myCos : botCos(), streak: me ? myStreak : 0 });
     }
     for (let i = 0; i < nEs; i++) {
       const me = role === 'escapist' && i === playerIndex;
       const name = botName(botI++);
-      const horse = me && this.data_.horse !== undefined ? this.data_.horse : Math.floor(Math.random() * HYPE.horses.length);
-      roster.push({ id: id++, team: 'escapist', name: me ? profile.look.name : name, look: me ? profile.look : randomLook(name), human: me && !this.autotest, horse, cos: me ? myCos : botCos(), streak: me ? myStreak : 0 });
+      roster.push({ id: id++, team: 'escapist', name: me ? profile.look.name : name, look: me ? profile.look : randomLook(name), human: me && !this.autotest, cos: me ? myCos : botCos(), streak: me ? myStreak : 0 });
     }
     const playerId = roster.find((r) => r.team === role && (r.human || this.autotest))!.id;
     const pid = this.autotest ? roster.filter((r) => r.team === role)[playerIndex].id : playerId;
@@ -242,6 +243,7 @@ export class GameScene extends Phaser.Scene {
 
   private cleanup(): void {
     this.scale.off(Phaser.Scale.Events.RESIZE, this.onResize, this);
+    this.scene.stop('Minigame');
     for (const v of this.views.values()) v.destroy();
     for (const v of this.pickupViews.values()) v.destroy();
     for (const v of this.projViews.values()) v.destroy();
@@ -288,6 +290,11 @@ export class GameScene extends Phaser.Scene {
   }
 
   private readInput(): void {
+    // Durante el Parón la partida está congelada: las teclas van al minijuego.
+    if (this.model.paron()) {
+      this.model.setHeld({ mx: 0, my: 0, sprint: false });
+      return;
+    }
     const v = input.moveVector();
     const p = this.player;
     this.model.setHeld({ mx: v.x, my: v.y, sprint: input.isDown('sprint') });
@@ -323,6 +330,8 @@ export class GameScene extends Phaser.Scene {
 
     const events = m.update(dt);
     for (const e of events) this.handle(e);
+    // ¡Parón! Se abre la capa del minijuego encima de la partida congelada.
+    if (m.paron() && !this.scene.isActive('Minigame') && !this.scene.isPaused('Minigame')) this.launchMinigame();
     this.syncViews();
     this.render(dt);
     this.updateCamera();
@@ -381,6 +390,16 @@ export class GameScene extends Phaser.Scene {
           this.fx.confetti(me.x, me.y - 30, 60);
           this.events.emit('burst', 80);
         }
+        // Cámara lenta y zoom de medio segundo en el momento clave.
+        if (!settings.reduceFx) {
+          const cam = this.cameras.main;
+          const z = cam.zoom;
+          cam.zoomTo(z * 1.25, 250, 'Sine.easeOut');
+          this.time.delayedCall(700, () => cam.zoomTo(z, 400, 'Sine.easeInOut'));
+          this.tweens.timeScale = 0.4;
+          this.time.delayedCall(500, () => (this.tweens.timeScale = 1));
+        }
+        input.rumble(won ? 0.6 : 0.3, 400);
         if (this.autotest) {
           const alive = m.chars.filter((c) => c.alive && !c.isChaser).length;
           const coins = m.chars.reduce((a, c) => a + c.stats.coins, 0);
@@ -719,12 +738,16 @@ export class GameScene extends Phaser.Scene {
       case 'emote':
         this.viewOf(e.id)?.showEmote(e.e);
         break;
-      case 'race':
-        this.events.emit('race', e.w);
+      case 'paron':
+        audio.playMusic(null);
         break;
-      case 'raceEnd':
-        this.events.emit('raceEnd', e.w);
+      case 'resume': {
+        audio.playMusic('game');
+        const perk = PERKS.find((p) => p.id === me.perk);
+        this.events.emit('announce', perk ? `¡VENTAJA: ${perk.name}!` : '¡SEGUIMOS!', perk ? 0x63c74d : 0xfee761, true);
+        if (perk) fx.ring(me.x, me.y - 8, 0x63c74d, 40);
         break;
+      }
       case 'say': {
         const c = this.charOf(e.id);
         if (!c) break;
@@ -823,7 +846,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   shake(intensity: number, duration = 120): void {
-    this.cameras.main.shake(duration, intensity, true);
+    shakeFx(this, intensity, duration);
   }
 
   // ------------------------------------------------------------------ fin de partida
@@ -841,30 +864,28 @@ export class GameScene extends Phaser.Scene {
       data = {
         mode: m.mode,
         champion: champ ? champ.name : null,
-        horse: r.horse,
-        myHorse: me.horse,
+        paron: this.paronSummary(m.lastParon, me.id),
         mapId: m.mapId,
         role: this.player.team,
         winner: r.winner,
         timePlayed: r.timePlayed,
         duration: r.duration,
         online: true,
-        entries: r.entries.map((e) => ({ name: e.name, team: e.team, isPlayer: e.id === m.playerId, alive: e.alive, stats: e.stats, look: e.look })),
+        entries: r.entries.map((e) => ({ name: e.name, team: e.team, isPlayer: e.id === m.playerId, alive: e.alive, stats: e.stats, look: e.look, cos: m.chars.find((c) => c.id === e.id)?.cos })),
       };
     } else {
       const champ = m.chars.find((c) => c.id === m.champion);
       data = {
         mode: m.mode,
         champion: champ ? champ.name : null,
-        horse: (m as OfflineModel).sim.hype.horseWinner,
-        myHorse: me.horse,
+        paron: this.paronSummary((m as OfflineModel).lastParon ? { mg: (m as OfflineModel).lastParon!.def.id, res: (m as OfflineModel).lastParon!.results } : null, me.id),
         mapId: m.mapId,
         role: this.player.team,
         winner: m.winner ?? 'escapist',
         timePlayed: m.matchTime,
         duration: m.duration,
         online: false,
-        entries: m.chars.map((c) => ({ name: c.name, team: c.team, isPlayer: c.id === m.playerId, alive: c.alive, stats: { ...c.stats }, look: c.look })),
+        entries: m.chars.map((c) => ({ name: c.name, team: c.team, isPlayer: c.id === m.playerId, alive: c.alive, stats: { ...c.stats }, look: c.look, cos: c.cos })),
       };
     }
     this.finished = true;
@@ -877,6 +898,31 @@ export class GameScene extends Phaser.Scene {
     this.scene.start('Results', data);
   }
 
+  private paronSummary(p: { mg: string; res: { id: number; place: number; label: string; won: boolean }[] } | null, myId: number): ResultsData['paron'] {
+    const r = p?.res.find((x) => x.id === myId);
+    return p && r ? { mg: p.mg, place: r.place, label: r.label, won: r.won } : null;
+  }
+
+  private launchMinigame(): void {
+    const m = this.model;
+    const host: MgHost = {
+      myId: m.playerId,
+      net: () => m.paron(),
+      t: () => m.paronT(),
+      input: (k) => m.mgInput(k),
+      react: (e) => m.react(e),
+      reactions: () => m.drainReactions(),
+      info: (id) => {
+        const c = m.chars.find((x) => x.id === id);
+        return c ? { name: c.name, look: c.look, team: c.team, cos: c.cos } : undefined;
+      },
+      onEnd: () => undefined,
+    };
+    this.scene.launch('Minigame', { host });
+    this.scene.bringToTop('Minigame');
+    this.scene.bringToTop('Toast');
+  }
+
   private openPause(): void {
     audio.play('click');
     input.consume();
@@ -884,6 +930,7 @@ export class GameScene extends Phaser.Scene {
     if (!this.model.online) {
       this.scene.pause();
       this.scene.pause('UI');
+      if (this.scene.isActive('Minigame')) this.scene.pause('Minigame');
     }
     this.scene.launch('Pause', { online: this.model.online });
     this.scene.bringToTop('Pause');
@@ -892,6 +939,6 @@ export class GameScene extends Phaser.Scene {
   restartMatch(): void {
     if (this.model.online) return;
     this.scene.stop('UI');
-    this.scene.restart({ mode: this.model.mode, mapId: this.model.mapId, role: this.data_.role, horse: this.data_.horse });
+    this.scene.restart({ mode: this.model.mode, mapId: this.model.mapId, role: this.data_.role });
   }
 }

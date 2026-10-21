@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { VIEW_H, VIEW_W } from '../config/balance';
-import { HYPE, NET } from '../../shared/balance';
+import { NET } from '../../shared/balance';
 import { LOOK_COLORS } from '../../shared/look';
 import { MAPS } from '../../shared/maps';
 import { MODE_LIST, modeInfo } from '../../shared/modes/rules';
@@ -83,7 +83,7 @@ export class LobbyScene extends Phaser.Scene {
     const defs: [string, () => string, (d: number) => void, boolean][] = [
       ['MODO', () => (cur()?.mode === 'voto' || !cur() ? 'VOTACIÓN' : SHORT[cur()!.mode as ModeId]), (d) => set({ mode: cycle(modes, cur()?.mode, d) }), true],
       ['TU VOTO', () => (me()?.vote ? SHORT[me()!.vote!] : '-'), (d) => net.sendMsg({ t: 'vote', m: cycle(MODE_IDS, me()?.vote ?? undefined, d) }), false],
-      ['CABALLO', () => (me() && me()!.horse >= 0 ? HYPE.horses[me()!.horse].split(' ')[0] : 'AL AZAR'), (d) => net.sendMsg({ t: 'horse', h: ((me()?.horse ?? -1) + d + HYPE.horses.length) % HYPE.horses.length }), false],
+      ['PARÓN', () => (cur()?.paron === false ? 'NO' : 'SÍ'), () => set({ paron: !(cur()?.paron ?? true) }), true],
       ['MAPA', () => MAPS.find((m) => m.id === cur()?.mapId)?.name ?? '', (d) => set({ mapId: cycle(MAPS.map((m) => m.id), cur()?.mapId, d) }), true],
       ['CAZADORES', () => (cur()?.hunters ? String(cur()!.hunters) : 'AUTO'), (d) => set({ hunters: cycle(NET.huntersOptions, cur()?.hunters as never, d) }), true],
       ['DURACIÓN', () => fmt(cur()?.duration ?? 120), (d) => set({ duration: cycle(NET.durationOptions, cur()?.duration as never, d) }), true],
@@ -99,7 +99,9 @@ export class LobbyScene extends Phaser.Scene {
     });
     this.readyBtn = this.menu.add(new Button(this, x, 189, '¡ESTOY LISTO!', () => this.toggleReady(), 150, 14, UI.green));
     this.startBtn = this.menu.add(new Button(this, x, 205, 'EMPEZAR PARTIDA', () => net.sendMsg({ t: 'start' }), 150, 14, UI.green));
-    this.menu.add(new Button(this, x, 221, 'COPIAR ENLACE', () => this.copyLink(), 150, 14));
+    this.menu.add(new Button(this, x - 38, 221, 'COPIAR ENLACE', () => this.copyLink(), 74, 14));
+    // Mientras se espera, un minijuego contra bots (si empieza la partida, te lleva a ella).
+    this.menu.add(new Button(this, x + 38, 221, 'MINIJUEGO', () => fadeTo(this, 'MinigameHub', { fromLobby: true }), 74, 14, UI.green));
     this.menu.add(new Button(this, x - 38, 238, 'PERSONAJE', () => this.editLook(), 74, 14));
     this.menu.add(new Button(this, x + 38, 238, 'SALIR', () => this.leave(), 74, 14));
     this.status = text(this, VIEW_W / 2, VIEW_H - 10, '', { color: UI.focus });

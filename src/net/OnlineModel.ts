@@ -5,6 +5,7 @@ import type { MapId } from '../../shared/maps';
 import { buildRows, MapScale } from '../../shared/mapScale';
 import { abilityFor, canMoveFor, speedMulFor } from '../../shared/modes/rules';
 import { emptyModeNet, ModeNet } from '../../shared/modes/types';
+import type { MgKey, ParonNet } from '../../shared/minigames';
 import { buildProps, Prop } from '../../shared/props';
 import { F, F2, MeNet, PICKUPS, ResultNet, ServerMsg, SnapshotNet, STATES } from '../../shared/protocol';
 import { PRESS_BUFFER, SimChar } from '../../shared/sim/Char';
@@ -54,7 +55,7 @@ export class OnlineModel implements GameModel {
   timeLeft: number;
   matchTime = 0;
   winner: Team | null = null;
-  results: { mode: ModeId; winner: Team; champion: number; horse: number; timePlayed: number; duration: number; entries: ResultNet[] } | null = null;
+  results: { mode: ModeId; winner: Team; champion: number; timePlayed: number; duration: number; entries: ResultNet[] } | null = null;
   readonly roster: StartMsg['roster'];
 
   private byId = new Map<number, SimChar>();
@@ -87,7 +88,6 @@ export class OnlineModel implements GameModel {
     this.props = this.mode === 'escondite' ? buildProps(this.grid, start.seed) : [];
     for (const r of start.roster) {
       const c = new SimChar({ id: r.id, team: r.team, name: r.name, look: r.look, human: r.human, x: 0, y: 0 });
-      c.horse = r.horse ?? 0;
       c.cos = r.cos ?? {};
       c.streak = r.streak ?? 0;
       c.spinsLeft = HYPE.personalSpins;
@@ -118,6 +118,36 @@ export class OnlineModel implements GameModel {
   }
 
   private localEvents: SimEvent[] = [];
+  private pnet: ParonNet | null = null;
+  /** Resultado del último Parón (para la pantalla final). */
+  lastParon: { mg: string; res: { id: number; place: number; label: string; won: boolean }[] } | null = null;
+  private pnetAt = 0;
+  private reactions: { id: number; e: number }[] = [];
+
+  paron(): ParonNet | null {
+    return this.pnet;
+  }
+
+  /** Tiempo del minijuego: el último del servidor + lo que ha pasado desde que llegó. */
+  paronT(): number {
+    const t = (this.pnet?.st?.t as number | undefined) ?? 0;
+    if (this.pnet?.ph !== 'play') return t;
+    return t + (performance.now() - this.pnetAt) / 1000;
+  }
+
+  mgInput(k: MgKey): void {
+    net.sendMsg({ t: 'mi', k, p: Math.round(net.ping) });
+  }
+
+  react(e: number): void {
+    net.sendMsg({ t: 're', e });
+  }
+
+  drainReactions(): { id: number; e: number }[] {
+    const r = this.reactions;
+    this.reactions = [];
+    return r;
+  }
 
   get ping(): number {
     return net.ping;
@@ -135,9 +165,14 @@ export class OnlineModel implements GameModel {
 
   private onMsg(msg: ServerMsg): void {
     if (msg.t === 's') this.onSnapshot(msg.s, msg.m);
+    else if (msg.t === 'mg') {
+      if (msg.p.res) this.lastParon = { mg: msg.p.mg, res: msg.p.res };
+      this.pnet = msg.p.ph === 'end' ? null : msg.p;
+      this.pnetAt = performance.now();
+    } else if (msg.t === 're') this.reactions.push({ id: msg.id, e: msg.e });
     else if (msg.t === 'start') net.takePendingStart(); // reconexión: seguimos en esta misma partida
     else if (msg.t === 'results')
-      this.results = { mode: msg.mode, winner: msg.winner, champion: msg.champion, horse: msg.horse, timePlayed: msg.timePlayed, duration: msg.duration, entries: msg.entries };
+      this.results = { mode: msg.mode, winner: msg.winner, champion: msg.champion, timePlayed: msg.timePlayed, duration: msg.duration, entries: msg.entries };
   }
 
   private onSnapshot(s: SnapshotNet, m?: MeNet): void {
@@ -182,6 +217,7 @@ export class OnlineModel implements GameModel {
     c.invisible = f2 & F2.invisible ? 0.2 : 0;
     c.heldItem = f2 & F2.barrier ? 'barrier' : f2 & F2.grenade ? 'grenade' : null;
     c.dashFree = f2 & F2.dashFree ? 0.2 : 0;
+    c.perk = f2 & F2.perkSpeed ? 'speed' : f2 & F2.perkCd ? 'cooldown' : c.perk === 'shield' ? 'shield' : null;
   }
 
   private reconcile(e: number[], ts: number, m?: MeNet): void {
@@ -287,7 +323,8 @@ export class OnlineModel implements GameModel {
 
   private predict(dt: number, out: SimEvent[]): void {
     const me = this.me;
-    if (!this.snaps.length) return;
+    // Durante el Parón la partida está congelada: no se predice nada.
+    if (!this.snaps.length || this.pnet) return;
     this.ctx.matchTime = this.matchTime;
     const it = emptyIntent();
     it.mx = this.held.mx;

@@ -50,6 +50,10 @@ export interface Settings {
   fullscreen: boolean;
   /** Voces sintetizadas de las frases. */
   voices: boolean;
+  /** Menos temblores de pantalla y destellos. */
+  reduceFx: boolean;
+  /** Vibración del mando. */
+  rumble: boolean;
   duration: number;
   chasers: number;
   escapists: number;
@@ -65,6 +69,8 @@ function defaults(): Settings {
     difficulty: 'normal',
     fullscreen: false,
     voices: true,
+    reduceFx: false,
+    rumble: true,
     duration: BALANCE.match.defaultDuration,
     chasers: BALANCE.match.defaultChasers,
     escapists: BALANCE.match.defaultEscapists,
@@ -89,6 +95,8 @@ function load(): Settings {
       difficulty: s.difficulty && s.difficulty in BALANCE.ai ? s.difficulty : d.difficulty,
       fullscreen: !!s.fullscreen,
       voices: s.voices === undefined ? true : !!s.voices,
+      reduceFx: !!s.reduceFx,
+      rumble: s.rumble === undefined ? true : !!s.rumble,
       duration: (m.durationOptions as readonly number[]).includes(s.duration as number) ? (s.duration as number) : d.duration,
       chasers: Math.round(clamp(s.chasers, m.minChasers, m.maxChasers, d.chasers)),
       escapists: Math.round(clamp(s.escapists, m.minEscapists, m.maxEscapists, d.escapists)),

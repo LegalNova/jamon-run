@@ -56,6 +56,7 @@ export class PauseScene extends Phaser.Scene {
     if (!this.online) {
       this.scene.resume('Game');
       this.scene.resume('UI');
+      if (this.scene.isPaused('Minigame')) this.scene.resume('Minigame');
     }
     this.scene.stop();
   }
@@ -79,6 +80,7 @@ export class PauseScene extends Phaser.Scene {
     game.model?.destroy();
     if (this.online) net.leave();
     this.scene.stop('UI');
+    this.scene.stop('Minigame');
     this.scene.stop('Game');
     audio.playMusic('menu');
     this.scene.start('Menu');

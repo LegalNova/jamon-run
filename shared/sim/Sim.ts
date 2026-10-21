@@ -1,4 +1,4 @@
-import { AIParams, BALANCE, CITY, Difficulty, HYPE, PHRASES, TILE } from '../balance';
+import { AIParams, BALANCE, CITY, Difficulty, HYPE, PARON, PHRASES, TILE } from '../balance';
 import { resolveCircle } from '../collision';
 import { DistField, Grid, SHOT_BLOCKERS, Terrain } from '../grid';
 import { MapId } from '../maps';
@@ -42,6 +42,8 @@ export interface SimOptions {
   mode?: ModeId;
   /** Semilla de los objetos del mapa (Escondite). */
   seed?: number;
+  /** Parón Dopamina (minijuego a mitad de partida). */
+  paron?: boolean;
 }
 
 /** Hint sonoro reciente (la IA de los buscadores lo usa). */
@@ -69,6 +71,10 @@ export class Sim implements SimCtx, BotWorld {
   /** Ganador individual (Jamón Bomba, Leyenda de Infección). */
   champion = -1;
   hints: HintMark[] = [];
+  /** Congelada por el Parón: nadie se mueve, nadie recibe golpes, el reloj no avanza. */
+  frozen = false;
+  readonly paronAt: number;
+  private paronDone: boolean;
   readonly scale: MapScale;
   readonly ai: AIParams;
   readonly duration: number;
@@ -114,6 +120,9 @@ export class Sim implements SimCtx, BotWorld {
     this.timeLeft = this.duration;
     this.props = this.mode === 'escondite' ? buildProps(this.grid, this.seed) : [];
     this.modeImpl = createMode(this.mode);
+    this.paronDone = o.paron === false;
+    const [a, b] = this.mode === 'bomba' ? PARON.bombaAt : [PARON.at[0] * this.duration, PARON.at[1] * this.duration];
+    this.paronAt = a + Math.random() * (b - a);
     this.spawn(o.roster);
     this.modeImpl.setup(this);
     this.hype = new Hype(this);
@@ -183,7 +192,6 @@ export class Sim implements SimCtx, BotWorld {
 
   private add(r: RosterEntry, x: number, y: number): void {
     const c = new SimChar({ id: r.id, team: r.team, name: r.name, look: r.look, human: r.human, x, y });
-    c.horse = r.horse ?? Math.floor(Math.random() * HYPE.horses.length);
     c.cos = r.cos ?? {};
     c.streak = r.streak ?? 0;
     this.chars.push(c);
@@ -414,7 +422,20 @@ export class Sim implements SimCtx, BotWorld {
 
   // ------------------------------------------------------------------ bucle
 
+  /** Vuelve la partida tras el Parón, con las ventajas de los ganadores. */
+  resume(perks: Map<number, 'speed' | 'shield' | 'cooldown'>): void {
+    this.frozen = false;
+    for (const [id, perk] of perks) {
+      const c = this.byId.get(id);
+      if (!c || !c.alive) continue;
+      c.perk = perk;
+      if (perk === 'shield') c.shield = true;
+    }
+    this.events.push({ t: 'resume' });
+  }
+
   step(dt: number): void {
+    if (this.frozen) return;
     if (this.state === 'countdown') {
       const before = Math.ceil(this.countdown);
       this.countdown -= dt;
@@ -424,6 +445,18 @@ export class Sim implements SimCtx, BotWorld {
         this.state = 'play';
         this.emit({ t: 'countdown', n: 0 });
       }
+    }
+
+    // ¡PARÓN! Una vez por partida, entre el 30% y el 70% del tiempo.
+    if (this.state === 'play' && !this.paronDone && this.matchTime >= this.paronAt && this.chars.some((c) => c.human)) {
+      this.paronDone = true;
+      this.frozen = true;
+      for (const c of this.chars) {
+        c.vx = c.vy = c.kbx = c.kby = 0;
+        c.dashTime = 0;
+      }
+      this.events.push({ t: 'paron' });
+      return;
     }
 
     if (this.state === 'play') {

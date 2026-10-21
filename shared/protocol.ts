@@ -4,6 +4,7 @@
  */
 import type { Difficulty } from './balance';
 import type { ApplyResult, Equipped } from './economy';
+import type { MgKey, ParonNet } from './minigames';
 import type { Look } from './look';
 import type { MapId } from './maps';
 import type { MapScale } from './mapScale';
@@ -17,6 +18,8 @@ export interface RoomSettings {
   /** Cazadores al empezar (buscadores / infectados / azules); 0 = automático. */
   hunters: number;
   mapId: MapId;
+  /** Parón Dopamina activado. */
+  paron: boolean;
   duration: number;
   /** Rellenar con bots hasta este número de personajes (0 = sin bots). */
   botFill: number;
@@ -32,9 +35,8 @@ export interface LobbyPlayer {
   ready: boolean;
   host: boolean;
   connected: boolean;
-  /** Voto de modo y caballo de la carrera (-1 = sin elegir). */
+  /** Voto de modo. */
   vote: ModeId | null;
-  horse: number;
   /** Cosméticos puestos (comprobados por el servidor) y racha de minijuegos. */
   cos: Equipped;
   streak: number;
@@ -48,7 +50,6 @@ export interface RosterNet {
   team: Team;
   look: Look;
   human: boolean;
-  horse?: number;
   cos?: Equipped;
   streak?: number;
 }
@@ -71,10 +72,13 @@ export type ServerMsg =
   | { t: 'lobby'; code: string; phase: RoomPhase; players: LobbyPlayer[]; settings: RoomSettings; you: number }
   | { t: 'start'; mode: ModeId; seed: number; mapId: MapId; scale: MapScale; duration: number; difficulty: Difficulty; roster: RosterNet[]; you: number; revealMs: number }
   | { t: 's'; s: SnapshotNet; m?: MeNet }
-  | { t: 'results'; mode: ModeId; winner: Team; champion: number; horse: number; timePlayed: number; duration: number; mapId: MapId; entries: ResultNet[] }
+  | { t: 'results'; mode: ModeId; winner: Team; champion: number; timePlayed: number; duration: number; mapId: MapId; entries: ResultNet[] }
   | { t: 'pong'; c: number; ts: number }
   /** Lo que has ganado en la partida (lo calcula el servidor). */
   | { t: 'reward'; res: ApplyResult }
+  /** Estado del Parón (minijuego) y reacciones (1-5). */
+  | { t: 'mg'; p: ParonNet }
+  | { t: 're'; id: number; e: number }
   | { t: 'error'; msg: string };
 
 /** Datos privados de tu personaje (para el HUD y la predicción). */
@@ -126,9 +130,11 @@ export type ClientMsg =
   /** Entrada: dirección (-100..100), sprint, contadores de pulsaciones (acción, especial, girar, ruleta). */
   | { t: 'in'; x: number; y: number; r: number; a: number; b: number; o?: number; q?: number }
   | { t: 'vote'; m: ModeId }
-  | { t: 'horse'; h: number }
   | { t: 'say'; p: number }
   | { t: 'emo' }
+  /** Tecla en el minijuego (p = tu ping en ms, para compensar). */
+  | { t: 'mi'; k: MgKey; p?: number }
+  | { t: 're'; e: number }
   | { t: 'ping'; c: number }
   | { t: 'leave' };
 
@@ -154,6 +160,8 @@ export const F = {
 /** Segundo bloque de flags (modos y ruleta). */
 export const F2 = {
   bomb: 1,
+  perkSpeed: 64,
+  perkCd: 128,
   anchored: 2,
   invisible: 4,
   barrier: 8,
@@ -181,6 +189,8 @@ export function encodeChar(c: SimChar): number[] {
   if (c.heldItem === 'barrier') f2 |= F2.barrier;
   if (c.heldItem === 'grenade') f2 |= F2.grenade;
   if (c.dashFree > 0) f2 |= F2.dashFree;
+  if (c.perk === 'speed') f2 |= F2.perkSpeed;
+  if (c.perk === 'cooldown') f2 |= F2.perkCd;
   return [
     c.id,
     Math.round(c.x * 10),

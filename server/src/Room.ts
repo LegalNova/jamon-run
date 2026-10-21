@@ -1,5 +1,5 @@
 import { DurableObject } from 'cloudflare:workers';
-import { BALANCE, HYPE, NET, PHRASES } from '../../shared/balance';
+import { BALANCE, NET, PHRASES } from '../../shared/balance';
 import { defaultHunters, validMode } from '../../shared/modes/rules';
 import { botName, randomLook, sanitizeLook } from '../../shared/look';
 import { MAPS } from '../../shared/maps';
@@ -19,6 +19,9 @@ import {
   STATES,
 } from '../../shared/protocol';
 import { Sim } from '../../shared/sim/Sim';
+import { MgKey, Paron } from '../../shared/minigames';
+import { secureRandom } from '../../shared/minigames/rng';
+import { PARON } from '../../shared/balance';
 import type { HeldInput, ModeId, Team } from '../../shared/sim/types';
 import type { Look } from '../../shared/look';
 import { profileOf, validAccount } from './accounts';
@@ -41,11 +44,13 @@ interface Player {
   oCount: number;
   qCount: number;
   vote: ModeId | null;
-  horse: number;
   /** Cuenta (perfil con lonchas) y cosméticos que lleva. */
   acct: string;
   cos: Equipped;
   streak: number;
+  /** Ping que dice tener (para compensar en los minijuegos; con tope). */
+  ping: number;
+  reactAt: number;
   /** Control de ritmo de mensajes de entrada. */
   winStart: number;
   winCount: number;
@@ -63,7 +68,12 @@ export class Room extends DurableObject<Env> {
   private nextId = 1;
   private hostId = -1;
   private phase: RoomPhase = 'lobby';
-  private settings: RoomSettings = { mode: 'voto', hunters: 0, mapId: 'forest', duration: 120, botFill: 8, difficulty: 'normal', isPublic: false };
+  private settings: RoomSettings = { mode: 'voto', hunters: 0, mapId: 'forest', paron: true, duration: 120, botFill: 8, difficulty: 'normal', isPublic: false };
+  /** Minijuego del Parón en marcha (la partida está congelada). */
+  private paron: Paron | null = null;
+  private paronTickAt = 0;
+  private paronPhase = '';
+  private rouletteHistory: string[] = [];
   private sim: Sim | null = null;
   private roster: RosterNet[] = [];
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -147,8 +157,9 @@ export class Room extends DurableObject<Env> {
         oCount: 0,
         qCount: 0,
         vote: null,
-        horse: -1,
         acct: validAccount(acct) ? acct : '',
+        ping: 80,
+        reactAt: 0,
         cos: {},
         streak: 0,
         winStart: 0,
@@ -236,15 +247,33 @@ export class Room extends DurableObject<Env> {
       case 'emo':
         this.sim?.emote(p.id);
         break;
+      case 'mi': {
+        // Tecla en el minijuego: se compensa media latencia (como mucho 150 ms).
+        const pr = this.paron;
+        if (!pr || !['a', 'b', 'l', 'r'].includes(msg.k)) break;
+        const now = Date.now();
+        if (now - p.winStart > 1000) {
+          p.winStart = now;
+          p.winCount = 0;
+        }
+        if (++p.winCount > 40) break;
+        if (typeof msg.p === 'number' && Number.isFinite(msg.p)) p.ping = Math.max(0, Math.min(400, msg.p));
+        const ahead = Math.min(0.05, (now - this.paronTickAt) / 1000);
+        pr.input(p.id, msg.k as MgKey, Math.min(0.15, p.ping / 2000) - ahead);
+        break;
+      }
+      case 're': {
+        // Reacciones (🔥😂😱👏🍖) durante el Parón: llegan a todos.
+        const now = Date.now();
+        const e = Math.floor(Number(msg.e));
+        if (!this.paron || !(e >= 0 && e < 5) || now - p.reactAt < 1000 / PARON.reactionsPerSec) break;
+        p.reactAt = now;
+        for (const o of this.players) if (o.ws) this.send(o.ws, { t: 're', id: p.id, e });
+        break;
+      }
       case 'vote':
         if (this.phase === 'lobby' && validMode(msg.m)) {
           p.vote = msg.m;
-          this.broadcastLobby();
-        }
-        break;
-      case 'horse':
-        if (this.phase === 'lobby' && Number.isInteger(msg.h) && msg.h >= 0 && msg.h < HYPE.horses.length) {
-          p.horse = msg.h;
           this.broadcastLobby();
         }
         break;
@@ -297,6 +326,7 @@ export class Room extends DurableObject<Env> {
     if (s.mode === 'voto' || validMode(s.mode)) this.settings.mode = s.mode;
     if (typeof s.hunters === 'number' && (NET.huntersOptions as readonly number[]).includes(s.hunters)) this.settings.hunters = s.hunters;
     if (s.mapId && MAPS.some((m) => m.id === s.mapId)) this.settings.mapId = s.mapId;
+    if (typeof s.paron === 'boolean') this.settings.paron = s.paron;
     if (typeof s.duration === 'number' && (NET.durationOptions as readonly number[]).includes(s.duration)) this.settings.duration = s.duration;
     if (typeof s.botFill === 'number' && (NET.botFillOptions as readonly number[]).includes(s.botFill)) this.settings.botFill = s.botFill;
     if (s.difficulty && s.difficulty in BALANCE.ai) this.settings.difficulty = s.difficulty;
@@ -338,15 +368,15 @@ export class Room extends DurableObject<Env> {
           team,
           look: s.human.look,
           human: true,
-          horse: s.human.horse >= 0 ? s.human.horse : Math.floor(Math.random() * HYPE.horses.length),
           cos: s.human.cos,
           streak: s.human.streak,
         };
       const name = botName(bi++);
-      return { id: botId++, name: `${name}`, team, look: randomLook(name), human: false, horse: Math.floor(Math.random() * HYPE.horses.length) };
+      return { id: botId++, name: `${name}`, team, look: randomLook(name), human: false };
     });
     const scale = scaleFor(total, this.settings.mapId);
-    this.sim = new Sim({ mode, mapId: this.settings.mapId, scale, duration: this.settings.duration, difficulty: this.settings.difficulty, roster: this.roster });
+    this.sim = new Sim({ mode, mapId: this.settings.mapId, scale, duration: this.settings.duration, difficulty: this.settings.difficulty, roster: this.roster, paron: this.settings.paron });
+    this.paron = null;
     // El modo puede cambiar los equipos (Jamón Bomba: todos contra todos).
     for (const r of this.roster) r.team = this.sim.byId.get(r.id)?.team ?? r.team;
     for (const p of humans) this.sim.setHeld(p.id, { mx: 0, my: 0, sprint: false });
@@ -422,6 +452,13 @@ export class Room extends DurableObject<Env> {
       this.phase = 'playing';
     }
     if (this.phase !== 'playing') return;
+    // ¡Parón! La partida no avanza: solo el minijuego.
+    if (sim.frozen) {
+      this.tickParon(sim, now);
+      // Snapshots más espaciados (nada se mueve), para que todo siga sincronizado.
+      if (this.tick++ % 4 === 0) this.broadcastSnapshot(sim, sim.drain().map(compactEvent), now);
+      return;
+    }
     for (let i = 0; i < SUBSTEPS; i++) sim.step(1 / 60);
     const events = sim.drain().map(compactEvent);
     this.tick++;
@@ -429,6 +466,46 @@ export class Room extends DurableObject<Env> {
     if (sim.state === 'ended') {
       if (!this.endedAt) this.endedAt = now;
       else if (now - this.endedAt > RESULTS_DELAY_MS) this.finishMatch(sim);
+    }
+  }
+
+  private tickParon(sim: Sim, now: number): void {
+    if (!this.paron) {
+      const players = sim.chars.map((c) => ({ id: c.id, name: c.name, team: c.team, bot: !this.players.some((p) => p.id === c.id && p.connected) }));
+      this.paron = new Paron(players, secureRandom, { extra: { rouletteHistory: this.rouletteHistory } });
+      this.paronPhase = '';
+    }
+    const pr = this.paron;
+    // Quien se desconecta pasa a jugar como bot.
+    for (const pl of pr.players) pl.bot = !this.players.some((p) => p.id === pl.id && p.connected);
+    pr.tick(TICK_MS / 1000);
+    this.paronTickAt = now;
+    // Estado del minijuego a 10 Hz (y siempre que cambia de fase).
+    const phaseChanged = pr.phase !== this.paronPhase;
+    this.paronPhase = pr.phase;
+    if (phaseChanged || this.tick % 2 === 0) {
+      const raw = JSON.stringify({ t: 'mg', p: pr.net() });
+      for (const p of this.players) if (p.ws) this.sendRaw(p.ws, raw);
+    }
+    if (pr.done) {
+      void this.payParon(pr);
+      sim.resume(pr.chosenPerks());
+      this.paron = null;
+    }
+  }
+
+  /** Lonchas por el minijuego (las calcula el servidor). */
+  private async payParon(pr: Paron): Promise<void> {
+    for (const r of pr.results) {
+      const p = this.players.find((x) => x.id === r.id);
+      if (!p || !p.acct || !p.connected) continue;
+      try {
+        const res = await profileOf(this.env, p.acct).report(p.acct, { kind: 'minigame', mg: pr.def.id, won: r.won, place: r.place, coins: r.bonus, stats: { perfects: r.perfects ?? 0 } }, true);
+        p.streak = res.profile.mgStreak;
+        if (p.ws) this.send(p.ws, { t: 'reward', res: { lonchas: res.lonchas, xp: res.xp, notices: res.notices } });
+      } catch {
+        /* no es crítico */
+      }
     }
   }
 
@@ -476,7 +553,6 @@ export class Room extends DurableObject<Env> {
       mode: sim.mode,
       winner: sim.winner ?? 'escapist',
       champion: sim.champion,
-      horse: sim.hype.horseWinner,
       timePlayed: sim.matchTime,
       duration: sim.duration,
       mapId: sim.mapId,
@@ -496,7 +572,7 @@ export class Room extends DurableObject<Env> {
   // ------------------------------------------------------------------ envío
 
   private lobbyPlayers(): LobbyPlayer[] {
-    return this.players.map((p) => ({ id: p.id, name: p.name, look: p.look, ready: p.ready, host: p.id === this.hostId, connected: p.connected, vote: p.vote, horse: p.horse, cos: p.cos, streak: p.streak }));
+    return this.players.map((p) => ({ id: p.id, name: p.name, look: p.look, ready: p.ready, host: p.id === this.hostId, connected: p.connected, vote: p.vote, cos: p.cos, streak: p.streak }));
   }
 
   private broadcastLobby(): void {

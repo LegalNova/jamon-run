@@ -5,6 +5,8 @@ import type { ModeNet } from '../../shared/modes/types';
 import type { Prop } from '../../shared/props';
 import type { SimChar } from '../../shared/sim/Char';
 import { Sim } from '../../shared/sim/Sim';
+import { MgKey, Paron, ParonNet } from '../../shared/minigames';
+import { account } from '../net/account';
 import type { HeldInput, MatchState, ModeId, PickupType, RosterEntry, SimEvent, Team } from '../../shared/sim/types';
 import type { Difficulty } from '../config/balance';
 
@@ -63,12 +65,30 @@ export interface GameModel {
   say(phrase: number): void;
   emote(): void;
   destroy(): void;
+  /** Parón Dopamina en marcha (o null). */
+  paron(): ParonNet | null;
+  /** Tiempo del minijuego, suave (para dibujar cuchillos, flechas...). */
+  paronT(): number;
+  mgInput(k: MgKey): void;
+  react(e: number): void;
+  /** Reacciones (1-5) recibidas desde la última vez. */
+  drainReactions(): { id: number; e: number }[];
+}
+
+/** Recompensas de un minijuego offline (con topes en el servidor). */
+export function reportMinigame(pr: Paron, myId: number): void {
+  const r = pr.results.find((x) => x.id === myId);
+  if (!r) return;
+  void account.reportOffline({ kind: 'minigame', mg: pr.def.id, won: r.won, place: r.place, coins: r.bonus, stats: { perfects: r.perfects ?? 0 } });
 }
 
 /** Partida contra bots en el propio navegador. */
 export class OfflineModel implements GameModel {
   readonly online = false;
   readonly sim: Sim;
+  private pr: Paron | null = null;
+  private reactions: { id: number; e: number }[] = [];
+  private extra = { rouletteHistory: [] as string[] };
 
   constructor(
     o: { mode: ModeId; mapId: MapId; scale: MapScale; duration: number; difficulty: Difficulty; roster: RosterEntry[] },
@@ -131,8 +151,50 @@ export class OfflineModel implements GameModel {
   }
 
   update(dt: number): SimEvent[] {
-    this.sim.step(dt);
+    if (this.sim.frozen) {
+      // ¡Parón! La partida no avanza: se juega el minijuego con los bots.
+      if (!this.pr) {
+        const players = this.sim.chars.map((c) => ({ id: c.id, name: c.name, team: c.team, bot: c.id !== this.playerId || !c.human }));
+        this.pr = new Paron(players, Math.random, { extra: this.extra });
+      }
+      this.pr.tick(dt);
+      // Los bots también reaccionan.
+      if ((this.pr.phase === 'podium' || this.pr.phase === 'play') && Math.random() < dt * 1.2) {
+        const bots = this.sim.chars.filter((c) => c.id !== this.playerId);
+        if (bots.length) this.reactions.push({ id: bots[Math.floor(Math.random() * bots.length)].id, e: Math.floor(Math.random() * 5) });
+      }
+      if (this.pr.done) {
+        reportMinigame(this.pr, this.playerId);
+        this.sim.resume(this.pr.chosenPerks());
+        this.lastParon = this.pr;
+        this.pr = null;
+      }
+    } else this.sim.step(dt);
     return this.sim.drain();
+  }
+
+  lastParon: Paron | null = null;
+
+  paron(): ParonNet | null {
+    return this.pr ? this.pr.net() : null;
+  }
+
+  paronT(): number {
+    return this.pr ? this.pr.game.t : 0;
+  }
+
+  mgInput(k: MgKey): void {
+    this.pr?.input(this.playerId, k, 0);
+  }
+
+  react(e: number): void {
+    this.reactions.push({ id: this.playerId, e });
+  }
+
+  drainReactions(): { id: number; e: number }[] {
+    const r = this.reactions;
+    this.reactions = [];
+    return r;
   }
 
   setHeld(h: HeldInput): void {

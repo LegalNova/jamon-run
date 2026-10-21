@@ -189,8 +189,9 @@ export class ShopScene extends Phaser.Scene {
     const it = this.current;
     // efectos animados de la vista previa
     if (it?.cat === 'hat' && this.hat.visible) {
-      const bob = Math.sin(this.t * 2.5) > 0 ? 0 : 4;
-      this.hat.setPosition(94, 196 - 4 * 15 + bob - hatLift(it.id) * 4);
+      // Igual que en partida: el gorro va 12 px por encima de los pies (y sube con el "respirar").
+      const bob = this.preview.frame.name.endsWith('idle1') ? 4 : 0;
+      this.hat.setPosition(94, 196 - 12 * 4 + bob - hatLift(it.id) * 4);
     }
     if (it?.cat === 'emote') this.emote.setY(100 + Math.sin(this.t * 4) * 4);
     if (it?.cat === 'frame') drawFrame(this.frameG, 94, 212, this.nameTag.width, it.id, this.t);

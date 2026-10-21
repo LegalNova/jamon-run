@@ -375,7 +375,6 @@ export const HYPE = {
     eliminate: 40,
     hintSurvived: 5,
     win: 60,
-    horse: 100,
     jackpot: 200,
     roulette: 50,
   },
@@ -388,11 +387,6 @@ export const HYPE = {
   /** Tirada personal: 1 por partida, disponible tras estos segundos. */
   personalSpins: 1,
   personalFrom: 10,
-  /** Carrera de caballos: cuándo se corre (fracción de la partida) y duración. */
-  raceAt: 0.5,
-  bombaRaceAt: 40,
-  raceSeconds: 8,
-  horses: ['PATA NEGRA', 'BELLOTA EXPRESS', 'LONCHA LOCA', 'SERRANITO'],
   /** Ruleta global: efectos para todos durante effectSeconds. */
   globalWheel: ['turbo', 'lluvia', 'cabezones', 'cambiazo', 'escudos', 'doble'],
   /** Ruleta personal (Q): premios y su probabilidad relativa. */
@@ -419,3 +413,53 @@ export function levelFor(xp: number): { level: number; cur: number; next: number
   }
   return { level, cur: xp - base, next: need };
 }
+
+/**
+ * PARÓN DOPAMINA: una vez por partida, entre el 30% y el 70% del tiempo, todo se congela
+ * y toca un minijuego. Duraciones de cada fase (s) y ventajas del ganador.
+ */
+export const PARON = {
+  at: [0.3, 0.7],
+  /** Jamón Bomba no tiene tiempo fijo: segundos de partida. */
+  bombaAt: [45, 110],
+  phases: { break: 1.8, slot: 2.8, howto: 2.2, podium: 4.5, count: 3 },
+  /** Ventajas para lo que queda de partida: +10% velocidad, escudo, recarga un 20% más rápida. */
+  perkSpeed: 1.1,
+  perkCooldown: 0.8,
+  /** Reacciones (1-5) por segundo como mucho. */
+  reactionsPerSec: 3,
+} as const;
+
+/** Valores de los minijuegos (pagos, cuotas, duraciones...). */
+export const MG = {
+  ruleta: {
+    chips: 100,
+    chip: 10,
+    bet: 11,
+    spin: 6,
+    show: 2,
+    /** Pagos (a 1): rojo/negro, par/impar, mitades 1 a 1; verde (0 o 00) 17 a 1; número 35 a 1. */
+    pay: { rojo: 1, negro: 1, verde: 17, par: 1, impar: 1, bajo: 1, alto: 1, numero: 35 },
+    /** Lonchas extra por fichas ganadas (si acabas con más de las que tenías). */
+    bonusRate: 0.5,
+    bonusCap: 150,
+  },
+  caballos: {
+    pick: 8,
+    race: 10,
+    show: 2.5,
+    horses: ['PATA NEGRA', 'IBÉRICO VELOZ', 'SERRANO TURBO', 'BELLOTA EXPRESS', 'JAMONCITO', 'LONCHA LOCA'],
+    /** Apuesta fija: si gana tu caballo cobras apuesta x cuota en lonchas. */
+    stake: 10,
+    bonusCap: 150,
+    /** Empujoncito por cada pulsación al animar (máximo por segundo). */
+    cheer: 0.0022,
+    cheerPerSec: 7,
+  },
+  corta: { cuts: 5, duration: 15, period: 1.3, periodStep: 0.16, cooldown: 0.35 },
+  torre: { duration: 20, period: 1.5, minPeriod: 0.42, step: 0.07, perfect: 0.04 },
+  tira: { duration: 15, beat: 0.5, window: 0.09, near: 0.18, winAt: 1 },
+  trilero: { cups: [3, 4, 5], swaps: [5, 7, 9], swapTime: [0.42, 0.32, 0.25], show: 1.1, pick: 2.3, reveal: 1.1 },
+  reflejos: { rounds: 3, waitMin: 1.4, waitMax: 3.6, window: 1.5, early: 1000, gap: 0.9 },
+  ritmo: { duration: 15, bpm: 128, perfect: 0.06, good: 0.13 },
+} as const;

@@ -86,7 +86,7 @@ export class MissionsScene extends Phaser.Scene {
       keep(text(this, 38, y + 9, def.text, { origin: [0, 0.5], color: m.claimed ? UI.muted : UI.text }));
       keep(text(this, 300, y + 9, `${Math.floor(m.progress)}/${def.goal}`, { origin: [1, 0.5], color: m.done ? UI.green : UI.muted }));
       this.bars.push({ x: 38, y: y + 20, w: 262, from: 0, to: m.progress / def.goal, t: 0, color: m.done ? 0x63c74d : 0xfeae34 });
-      const label = m.claimed ? 'HECHA' : m.done ? `+${def.reward}` : `${def.reward}`;
+      const label = m.claimed ? 'HECHA' : m.done ? `¡RECOGER +${def.reward}!` : `${def.reward} LONCHAS`;
       const b = this.menu.add(keep(new Button(this, 400, y + 16, label, () => void this.claim(m.id, 400, y + 16), 110, 18, m.done && !m.claimed ? UI.green : undefined)));
       b.setEnabled(m.done && !m.claimed);
     });

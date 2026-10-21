@@ -53,11 +53,6 @@ export class HypeOverlay {
   private shown = 0;
   private target = 0;
   private wheels: Phaser.GameObjects.Container[] = [];
-  private race: Phaser.GameObjects.Container | null = null;
-  private raceT = -1;
-  private raceHorses: { spr: Phaser.GameObjects.Sprite; T: number; bump: number; ph: number }[] = [];
-  private raceW = 0;
-  private gallopT = 0;
   private confetti: Phaser.GameObjects.Particles.ParticleEmitter;
   private toasts: Phaser.GameObjects.Container[] = [];
 
@@ -83,7 +78,8 @@ export class HypeOverlay {
   /** Monedas ganadas por ti. */
   addCoins(n: number, combo: number): void {
     this.target += n;
-    audio.play(combo > 1 ? 'combo' : 'coin');
+    // El tono sube con el combo.
+    audio.play(combo > 1 ? 'combo' : 'coin', 1 + (combo - 1) * 0.12);
     this.s.tweens.killTweensOf(this.coinIcon);
     this.coinIcon.setScale(1.8);
     this.s.tweens.add({ targets: this.coinIcon, scale: 1, duration: 260, ease: 'Back.easeOut' });
@@ -196,57 +192,6 @@ export class HypeOverlay {
     this.wheels.push(c);
   }
 
-  /** Empieza la carrera de caballos (el ganador ya está decidido por la simulación). */
-  startRace(w: number, myHorse: number): void {
-    this.race?.destroy();
-    const Wd = 230;
-    const Hd = 60;
-    const x0 = this.W / 2 - Wd / 2;
-    const y0 = 44;
-    const c = this.s.add.container(0, 0).setDepth(110);
-    const g = this.s.add.graphics();
-    panel(g, x0, y0, Wd, Hd, UI.panelDark);
-    for (let i = 0; i < 4; i++) {
-      g.fillStyle(i % 2 ? 0x2a6b3a : 0x2f7a42, 1).fillRect(x0 + 2, y0 + 11 + i * 12, Wd - 4, 12);
-      if (i === myHorse) g.lineStyle(1, 0xfee761, 1).strokeRect(x0 + 2.5, y0 + 11.5 + i * 12, Wd - 5, 11);
-    }
-    // meta a cuadros
-    for (let j = 0; j < 12; j++) {
-      g.fillStyle(j % 2 ? 0xffffff : 0x1a1424, 1).fillRect(x0 + Wd - 18, y0 + 11 + j * 4, 2, 2);
-      g.fillStyle(j % 2 ? 0x1a1424 : 0xffffff, 1).fillRect(x0 + Wd - 16, y0 + 11 + j * 4, 2, 2);
-    }
-    c.add(g);
-    c.add(text(this.s, this.W / 2, y0 + 6, '¡CARRERA DE CABALLOS!', { color: 0xfee761 }));
-    this.raceHorses = [];
-    const T = HYPE.raceSeconds - 0.8;
-    const leaderFake = (w + 1 + Math.floor(Math.random() * 3)) % 4;
-    for (let i = 0; i < 4; i++) {
-      const spr = this.s.add.sprite(x0 + 12, y0 + 17 + i * 12, `horse_${i}`).setOrigin(0.5, 0.5).play(`horse_${i}_run`);
-      spr.anims.timeScale = 0.8 + Math.random() * 0.4;
-      c.add(spr);
-      const name = text(this.s, x0 + 24, y0 + 17 + i * 12, HYPE.horses[i] + (i === myHorse ? ' (TU)' : ''), { origin: [0, 0.5], color: i === myHorse ? 0xfee761 : 0xffffff });
-      name.setAlpha(0.75);
-      c.add(name);
-      this.raceHorses.push({ spr, T: i === w ? T : T * (1.06 + Math.random() * 0.12), bump: i === leaderFake ? 0.12 : i === w ? -0.05 : (Math.random() - 0.5) * 0.08, ph: Math.random() * 6 });
-    }
-    this.raceW = Wd;
-    this.race = c;
-    this.raceT = 0;
-    audio.play('fanfare');
-  }
-
-  endRace(w: number, mine: boolean): void {
-    if (!this.race) return;
-    this.raceT = -1;
-    const c = this.race;
-    const label = text(this.s, this.W / 2, 44 + 60 + 8, `¡GANA ${HYPE.horses[w]}!${mine ? ` +${HYPE.coins.horse}` : ''}`, { color: mine ? 0xfee761 : 0xffffff, scale: 2 });
-    c.add(label);
-    if (mine) this.confetti.emitParticleAt(this.W / 2, 60, 50);
-    audio.play(mine ? 'jackpot' : 'fanfare');
-    this.s.tweens.add({ targets: c, alpha: 0, delay: 2600, duration: 400, onComplete: () => c.destroy() });
-    this.race = null;
-  }
-
   medal(name: string): void {
     audio.play('medal');
     const y = 70 + this.toasts.length * 16;
@@ -279,21 +224,6 @@ export class HypeOverlay {
     if (this.shown < this.target) {
       this.shown = Math.min(this.target, this.shown + Math.max(1, Math.ceil((this.target - this.shown) * dt * 8)));
       this.coinText.setText(String(this.shown));
-    }
-    if (this.raceT >= 0 && this.race) {
-      this.raceT += dt;
-      const x0 = this.W / 2 - this.raceW / 2 + 12;
-      const len = this.raceW - 34;
-      for (const h of this.raceHorses) {
-        const base = Math.min(1, this.raceT / h.T);
-        const p = Math.min(1, Math.max(0, base + h.bump * Math.sin(Math.PI * Math.min(1, this.raceT / h.T)) + Math.sin(this.raceT * 3 + h.ph) * 0.01));
-        h.spr.x = x0 + p * len;
-      }
-      this.gallopT -= dt;
-      if (this.gallopT <= 0) {
-        this.gallopT = 0.22;
-        audio.play('gallop');
-      }
     }
   }
 }

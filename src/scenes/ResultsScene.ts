@@ -4,7 +4,8 @@ import { account } from '../net/account';
 import type { ApplyResult } from '../../shared/economy';
 import { audio } from '../core/audio';
 import { input } from '../core/input';
-import { HYPE, levelFor } from '../../shared/balance';
+import { levelFor } from '../../shared/balance';
+import { mgDef, MgId } from '../../shared/minigames';
 import { modeInfo } from '../../shared/modes/rules';
 import { FONT, fontText } from '../gfx/font';
 import { Button, Menu, panel, text, UI } from '../ui/widgets';
@@ -13,6 +14,8 @@ import { Backdrop, fadeIn, fadeTo } from './common';
 import { net } from '../net/NetClient';
 import type { ResultEntry, ResultsData } from './GameScene';
 import { MODE_COLORS } from './ModeSelectScene';
+import { ensureCharTexture } from '../gfx/characters';
+import { dance } from '../game/cosmetics';
 
 function mmss(s: number): string {
   const t = Math.floor(s);
@@ -128,12 +131,13 @@ export class ResultsScene extends Phaser.Scene {
       text(this, 26, y, m, { origin: [0, 0.5], color: 0xffd23f });
     });
     if (!medals.length) text(this, 94, 93, 'SIN MEDALLAS ESTA VEZ', { color: UI.muted });
-    // carrera de caballos
+    // el Parón Dopamina
     const hy = 148;
-    const mine = d.myHorse === d.horse;
-    this.add.sprite(22, hy, `horse_${d.horse}`, 'f0').play(`horse_${d.horse}_run`);
-    text(this, 36, hy - 4, `CARRERA: ${HYPE.horses[d.horse] ?? '?'}`, { origin: [0, 0.5], color: mine ? 0xfee761 : UI.text });
-    text(this, 36, hy + 6, mine ? `¡ACERTASTE! +${HYPE.coins.horse}` : `TU CABALLO: ${HYPE.horses[d.myHorse] ?? '?'}`, { origin: [0, 0.5], color: mine ? 0x63c74d : UI.muted });
+    if (d.paron) {
+      this.add.image(22, hy, `mg_${d.paron.mg}`).setScale(0.6);
+      text(this, 36, hy - 4, `PARÓN: ${mgDef(d.paron.mg as MgId).name}`, { origin: [0, 0.5], color: d.paron.won ? 0xfee761 : UI.text });
+      text(this, 36, hy + 6, d.paron.won ? `¡GANASTE! ${d.paron.label}` : `PUESTO ${d.paron.place + 1} · ${d.paron.label}`, { origin: [0, 0.5], color: d.paron.won ? 0x63c74d : UI.muted });
+    } else text(this, 94, hy, 'SIN PARÓN EN ESTA PARTIDA', { color: UI.muted });
     // nivel
     text(this, 14, 170, `NIVEL`, { origin: [0, 0.5], color: UI.text });
     this.xpText = text(this, 172, 170, '', { origin: [1, 0.5], color: 0x7cc8ff });
@@ -187,12 +191,59 @@ export class ResultsScene extends Phaser.Scene {
         ),
       );
     } else {
-      this.menu.add(new Button(this, VIEW_W / 2 - 110, VIEW_H - 18, 'REVANCHA', () => fadeTo(this, 'RoleReveal', { mode, mapId: d.mapId, horse: d.myHorse }), 100, 18, UI.green));
+      this.menu.add(new Button(this, VIEW_W / 2 - 110, VIEW_H - 18, 'REVANCHA', () => fadeTo(this, 'RoleReveal', { mode, mapId: d.mapId }), 100, 18, UI.green));
       this.menu.add(new Button(this, VIEW_W / 2, VIEW_H - 18, 'OTRO MODO', () => fadeTo(this, 'ModeSelect'), 100, 18));
       this.menu.add(new Button(this, VIEW_W / 2 + 110, VIEW_H - 18, 'MENÚ', () => fadeTo(this, 'Menu'), 100, 18));
     }
     this.time.delayedCall(1200, () => audio.playMusic('menu'));
+    this.showMvp();
   }
+
+  /** Pantalla especial del MVP (más monedas) con su baile de victoria; luego se ve la tabla. */
+  private showMvp(): void {
+    const list = [...this.data_.entries].sort((a, b) => (b.stats.coins ?? 0) - (a.stats.coins ?? 0));
+    const mvp = list[0];
+    if (!mvp || !(mvp.stats.coins > 0)) return;
+    const c = this.add.container(0, 0).setDepth(100);
+    const bg = this.add.rectangle(-200, -200, VIEW_W + 400, VIEW_H + 400, 0x0b0912, 0.94).setOrigin(0);
+    c.add(bg);
+    const rays = this.add.graphics();
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2;
+      rays.fillStyle(i % 2 ? 0xfeae34 : 0xfee761, 0.12).slice(0, 0, 260, a, a + Math.PI / 12, false).fillPath();
+    }
+    rays.setPosition(VIEW_W / 2, 140);
+    c.add(rays);
+    this.tweens.add({ targets: rays, angle: 360, duration: 12000, repeat: -1 });
+    const key = ensureCharTexture(this, null, mvp.look);
+    const spr = this.add.sprite(VIEW_W / 2, 190, key, 'down_idle0').setScale(5).setOrigin(0.5, 1);
+    spr.play(`${key}_down_run`);
+    c.add(spr);
+    const stopDance = dance(this, spr, mvp.cos?.dance);
+    const title = text(this, VIEW_W / 2, 40, 'MVP DE LA PARTIDA', { scale: 3, color: 0xfee761 });
+    c.add(title);
+    c.add(text(this, VIEW_W / 2, 66, mvp.name, { scale: 2, color: mvp.isPlayer ? 0x63c74d : UI.text }));
+    c.add(text(this, VIEW_W / 2, 214, `${mvp.stats.coins} MONEDAS · ${mvp.stats.medals?.length ?? 0} MEDALLAS`, { color: 0xffd23f }));
+    c.add(text(this, VIEW_W / 2, 236, 'ENTER PARA CONTINUAR', { color: UI.muted }));
+    title.setScale(0);
+    this.tweens.add({ targets: title, scale: 3, duration: 400, ease: 'Bounce.easeOut' });
+    audio.play('fanfare');
+    this.fireworks.emitParticleAt(VIEW_W / 2, 120, 80);
+    // Cámara lenta un instante al aparecer.
+    this.tweens.timeScale = 0.5;
+    this.time.delayedCall(500, () => (this.tweens.timeScale = 1));
+    this.mvpShown = c;
+    const close = () => {
+      if (!this.mvpShown) return;
+      this.mvpShown = null;
+      this.tweens.add({ targets: c, alpha: 0, duration: 300, onComplete: () => (stopDance(), c.destroy()) });
+    };
+    this.time.delayedCall(3200, close);
+    this.closeMvp = close;
+  }
+
+  private mvpShown: Phaser.GameObjects.Container | null = null;
+  private closeMvp: (() => void) | null = null;
 
   /** Llega lo ganado (del servidor). */
   private setReward(res: ApplyResult): void {
@@ -259,6 +310,13 @@ export class ResultsScene extends Phaser.Scene {
         this.tweens.add({ targets: t, alpha: 0, delay: 2200, duration: 400 });
         for (let k = 0; k < 5; k++) this.time.delayedCall(k * 250, () => this.fireworks.emitParticleAt(40 + Math.random() * 400, 40 + Math.random() * 120, 40));
       }
+    }
+    if (this.mvpShown) {
+      if (input.confirm() || input.back()) {
+        input.consume();
+        this.closeMvp?.();
+      }
+      return;
     }
     if (input.back()) {
       audio.play('back');

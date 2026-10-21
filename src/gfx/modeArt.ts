@@ -241,7 +241,8 @@ function buildModeIcons(scene: Phaser.Scene): void {
 
 /** Caballos de la carrera (2 frames de galope) con el color de su jinete. */
 function buildHorses(scene: Phaser.Scene): void {
-  const silks = ['#e43b44', '#feae34', '#2f88e8', '#63c74d'];
+  // 6 caballos (Pata Negra, Ibérico Veloz, Serrano Turbo, Bellota Express, Jamoncito, Loncha Loca).
+  const silks = ['#e43b44', '#feae34', '#2f88e8', '#63c74d', '#b55088', '#f4f0e8'];
   silks.forEach((silk, i) => {
     const frames: { name: string; grid: PixelGrid }[] = [];
     for (let f = 0; f < 2; f++) {
@@ -307,7 +308,77 @@ function buildLights(scene: Phaser.Scene): void {
   }
 }
 
+/** Iconos de los minijuegos (30x30) y cubilete del trilero. */
+function buildMinigameIcons(scene: Phaser.Scene): void {
+  const mk = (key: string, draw: (g: PixelGrid) => void) => {
+    const g = new PixelGrid(30, 30);
+    draw(g);
+    g.outline(O);
+    gridTexture(scene, key, g);
+  };
+  mk('mg_ruleta', (g) => {
+    for (let i = 0; i < 38; i++) {
+      const a0 = (i / 38) * Math.PI * 2;
+      for (let r = 6; r <= 12; r++) g.set(15 + Math.cos(a0) * r, 15 + Math.sin(a0) * r, i === 0 ? '#63c74d' : i % 2 ? '#e43b44' : '#262033');
+    }
+    g.ellipse(15, 15, 5, 5, '#7a4a24');
+    g.ellipse(15, 15, 2, 2, '#ffd23f');
+    g.set(15, 4, '#ffffff');
+  });
+  mk('mg_caballos', (g) => {
+    g.pattern(3, 8, ['........ss......', '.......ssss.....', '........k.......', '......ssss...mm.', '.....sssss..bbbm', '.m...bbbbbbbbbbb', 'mm..bbbbbbbbbbb.', 'm..bbbbbbbbbbB..', '...bbbbbbbbbB...', '....b.b...b.b...', '...b...b.b...b..', '..B....B.B....B.'], { b: '#7a4a24', B: '#4a2a14', m: '#2a1a10', s: '#e43b44', k: '#f5c9a3' });
+  });
+  mk('mg_corta', (g) => {
+    g.pattern(2, 12, ['......rrrr...', '....rrmmmmr..', 'hbrrrmmffmmr.', 'hbrrrmfmmMmr.', 'hbRRrmmmmMMr.', '....RRmmmMr..', '......RRRR...'], { h: PAL.hoof, b: PAL.hamBone, r: PAL.hamRind, R: PAL.hamRindDark, m: PAL.hamMeat, M: PAL.hamMeatDark, f: PAL.hamFat });
+    g.pattern(17, 2, ['......ww', '.....www', '....www.', '...www..', '..www...', '.www....', 'kk......', 'kk......'], { w: '#c2c3c7', k: '#7a4a24' });
+  });
+  mk('mg_torre', (g) => {
+    const cols = ['#e46a72', '#c2414b', '#e46a72', '#c2414b', '#e46a72', '#c2414b'];
+    cols.forEach((c, i) => g.rect(6 + (i % 2) * 2 - (i % 3), 24 - i * 4, 16 - i, 3, c));
+    g.rect(4, 27, 22, 2, '#7a4a24');
+  });
+  mk('mg_tira', (g) => {
+    g.rect(2, 15, 26, 2, '#c79a1c');
+    g.rect(13, 12, 3, 8, '#e43b44');
+    g.ellipse(4, 11, 3, 3, '#2f88e8');
+    g.ellipse(26, 11, 3, 3, '#e43b44');
+  });
+  mk('mg_trilero', (g) => {
+    for (let i = 0; i < 3; i++) g.pattern(1 + i * 10, 12, ['..rrrr..', '.rrrrrr.', '.rRrrrr.', 'rRrrrrrr', 'rrrrrrrr', 'wwwwwwww'], { r: '#c2414b', R: '#e46a72', w: '#f4f0e8' });
+    g.pattern(13, 23, ['yyyy'], { y: '#ffd23f' });
+  });
+  mk('mg_reflejos', (g) => {
+    g.ellipse(15, 16, 11, 11, '#f4f0e8');
+    g.ellipse(15, 16, 9, 9, '#262033');
+    g.rect(15, 9, 1, 8, '#e43b44');
+    g.rect(15, 16, 6, 1, '#e43b44');
+    g.rect(12, 2, 7, 3, '#c2c3c7');
+  });
+  mk('mg_ritmo', (g) => {
+    g.pattern(2, 6, ['...w......', '..ww......', '.wwwwwww..', 'wwwwwwww..', '.wwwwwww..', '..ww......', '...w......'], { w: '#7cc8ff' });
+    g.pattern(16, 16, ['......w...', '......ww..', '..wwwwwww.', '..wwwwwwww', '..wwwwwww.', '......ww..', '......w...'], { w: '#ff7ab8' });
+  });
+  // cubilete del trilero
+  {
+    const g = new PixelGrid(22, 14);
+    g.pattern(1, 1, ['......rrrrrrr.......', '.....rRrrrrrrr......', '....rRRrrrrrrrr.....', '....rRrrrrrrrrr.....', '...rRRrrrrrrrrrr....', '...rRrrrrrrrrrrr....', '..rRRrrrrrrrrrrrr...', '..rRrrrrrrrrrrrrr...', '.rRRrrrrrrrrrrrrrr..', '.rRrrrrrrrrrrrrrrr..', 'wwwwwwwwwwwwwwwwwwww', 'kkkkkkkkkkkkkkkkkkkk'], { r: '#c2414b', R: '#e46a72', w: '#f6dcc0', k: '#7a3b22' });
+    g.outline(O);
+    gridTexture(scene, 'cup', g);
+  }
+  // cuchillo jamonero
+  {
+    const g = new PixelGrid(10, 40);
+    g.rect(3, 1, 4, 26, '#c2c3c7');
+    g.rect(3, 1, 1, 26, '#ffffff');
+    g.rect(2, 27, 6, 2, '#5a6988');
+    g.rect(3, 29, 4, 10, '#7a4a24');
+    g.outline(O);
+    gridTexture(scene, 'knife', g);
+  }
+}
+
 export function buildModeArt(scene: Phaser.Scene): void {
+  buildMinigameIcons(scene);
   buildProps(scene);
   buildItems(scene);
   buildModeIcons(scene);

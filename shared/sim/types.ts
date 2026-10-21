@@ -113,8 +113,10 @@ export type SimEvent =
   | { t: 'roulette'; kind: 'global' | 'me'; id: number; r: number }
   | { t: 'effect'; e: string; on: boolean; id: number }
   | { t: 'emote'; id: number; e: string }
-  | { t: 'race'; w: number }
-  | { t: 'raceEnd'; w: number };
+  /** ¡PARÓN! La partida se congela para un minijuego. */
+  | { t: 'paron' }
+  | { t: 'resume' }
+  ;
 
 /** Quién juega una partida. */
 export interface RosterEntry {
@@ -124,8 +126,6 @@ export interface RosterEntry {
   look: Look;
   /** true = lo controla una persona (local u online). */
   human: boolean;
-  /** Caballo votado para la carrera (0..3). */
-  horse?: number;
   /** Cosméticos (solo visuales). */
   cos?: import('../economy').Equipped;
   streak?: number;

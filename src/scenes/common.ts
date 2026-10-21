@@ -10,6 +10,7 @@ export function fadeTo(scene: Phaser.Scene, key: string, data?: object): void {
   if (s.__leaving) return;
   s.__leaving = true;
   input.consume();
+  pixelate(scene, 0, 8, 180);
   scene.cameras.main.fadeOut(180, 13, 11, 20);
   scene.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
     s.__leaving = false;
@@ -21,6 +22,23 @@ export function fadeIn(scene: Phaser.Scene, menuCamera = true): void {
   (scene as Phaser.Scene & { __leaving?: boolean }).__leaving = false;
   if (menuCamera) fitMenuCamera(scene);
   scene.cameras.main.fadeIn(200, 13, 11, 20);
+  pixelate(scene, 8, 0, 220);
+}
+
+/** Transición pixelada (solo con WebGL; si no, se queda el fundido). */
+function pixelate(scene: Phaser.Scene, from: number, to: number, ms: number): void {
+  if (settings.reduceFx) return;
+  const cam = scene.cameras.main as Phaser.Cameras.Scene2D.Camera & { postFX?: { addPixelate(a: number): { amount: number }; remove(fx: unknown): void } };
+  const fx = cam.postFX?.addPixelate(from);
+  if (!fx) return;
+  scene.tweens.add({
+    targets: fx,
+    amount: to,
+    duration: ms,
+    onComplete: () => {
+      if (to === 0) cam.postFX?.remove(fx);
+    },
+  });
 }
 
 /** Zoom entero y tamaño lógico de la vista (px de juego) para el tamaño actual de la ventana. */

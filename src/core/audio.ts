@@ -48,7 +48,17 @@ export type Sfx =
   | 'fanfare'
   | 'levelup'
   | 'medal'
-  | 'alarm';
+  | 'alarm'
+  | 'horn'
+  | 'slice'
+  | 'cheer'
+  | 'heart'
+  | 'whoosh'
+  | 'drum'
+  | 'note0'
+  | 'note1'
+  | 'thump'
+  | 'ball'
 
 type Track = 'menu' | 'game';
 
@@ -279,8 +289,9 @@ class AudioEngine {
     const o = ctx.createOscillator();
     const g = ctx.createGain();
     o.type = type;
-    o.frequency.setValueAtTime(freq, t);
-    if (endFreq) o.frequency.exponentialRampToValueAtTime(Math.max(20, endFreq), t + dur);
+    const pm = out === this.sfxGain ? this.pitch : 1;
+    o.frequency.setValueAtTime(freq * pm, t);
+    if (endFreq) o.frequency.exponentialRampToValueAtTime(Math.max(20, endFreq * pm), t + dur);
     g.gain.setValueAtTime(0, t);
     g.gain.linearRampToValueAtTime(vol, t + 0.005);
     g.gain.setValueAtTime(vol, t + dur * 0.6);
@@ -320,7 +331,11 @@ class AudioEngine {
 
   // ---------------------------------------------------------------- efectos
 
-  play(name: Sfx): void {
+  /** Multiplicador de tono del sonido que se está generando (sube en combos y rachas). */
+  private pitch = 1;
+
+  play(name: Sfx, pitch = 1): void {
+    this.pitch = pitch;
     if (!this.ctx || this.ctx.state !== 'running') return;
     const ctx = this.ctx;
     const now = ctx.currentTime;
@@ -476,6 +491,42 @@ class AudioEngine {
         break;
       case 'medal':
         this.arp(['E5', 'B5', 'E6'], t, 0.08, 'triangle', 0.2);
+        break;
+      case 'horn':
+        // corneta: dos notas largas que suben
+        this.tone(out, 'sawtooth', noteFreq('G4'), t, 0.18, 0.13);
+        this.tone(out, 'sawtooth', noteFreq('C5'), t + 0.18, 0.18, 0.13);
+        this.tone(out, 'sawtooth', noteFreq('E5'), t + 0.36, 0.5, 0.15);
+        this.tone(out, 'square', noteFreq('C4'), t + 0.36, 0.5, 0.08);
+        break;
+      case 'slice':
+        this.noiseBurst(out, t, 0.12, 0.35, 'highpass', 2500, 7000);
+        this.tone(out, 'triangle', 1800, t, 0.05, 0.1, 900);
+        break;
+      case 'cheer':
+        this.noiseBurst(out, t, 0.7, 0.18, 'bandpass', 1200, 1800);
+        break;
+      case 'heart':
+        this.tone(out, 'sine', 70, t, 0.1, 0.45, 50);
+        this.tone(out, 'sine', 65, t + 0.16, 0.1, 0.35, 45);
+        break;
+      case 'whoosh':
+        this.noiseBurst(out, t, 0.25, 0.25, 'bandpass', 600, 2400);
+        break;
+      case 'drum':
+        this.tone(out, 'sine', 160, t, 0.12, 0.5, 45);
+        break;
+      case 'note0':
+        this.tone(out, 'square', noteFreq(['C5', 'E5', 'G5', 'A5'][Math.floor(Math.random() * 4)]), t, 0.12, 0.09);
+        break;
+      case 'note1':
+        this.tone(out, 'square', noteFreq(['D5', 'F5', 'A5', 'C6'][Math.floor(Math.random() * 4)]), t, 0.12, 0.09);
+        break;
+      case 'thump':
+        this.tone(out, 'triangle', 220, t, 0.08, 0.25, 110);
+        break;
+      case 'ball':
+        this.tone(out, 'square', 2200 + Math.random() * 800, t, 0.015, 0.05);
         break;
       case 'alarm':
         this.tone(out, 'square', 660, t, 0.15, 0.1, 990);

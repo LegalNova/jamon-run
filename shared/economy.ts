@@ -14,7 +14,7 @@ export const ECONOMY = {
   /** Partida: las monedas ganadas en la partida pasan a lonchas a este ritmo, más fijos por jugar y ganar. */
   match: { coinRate: 0.5, play: 20, win: 40, cap: 400 },
   /** Minijuegos: lonchas por puesto (1º, 2º, 3º, resto). */
-  minigame: { place: [70, 40, 25, 10], xp: [40, 25, 15, 8] },
+  minigame: { place: [70, 40, 25, 10], xp: [40, 25, 15, 8], bonusCap: 150 },
   /** Multiplicador por racha de minijuegos ganados seguidos. */
   streakMult: [1, 1, 1.2, 1.5, 2],
   /** Experiencia por partida. */
@@ -346,7 +346,8 @@ export function applyReport(p: Profile, r: PlayReport, offline: boolean, now = D
     for (const m of (r.medals ?? []).slice(0, 12)) p.medals[m] = (p.medals[m] ?? 0) + 1;
   } else {
     const place = Math.max(0, Math.min(3, Math.floor(r.place ?? 3)));
-    lonchas = E.minigame.place[place];
+    // Lonchas por el puesto + lo ganado apostando (ruleta, caballos), con tope.
+    lonchas = E.minigame.place[place] + Math.min(E.minigame.bonusCap, Math.max(0, Math.floor(r.coins ?? 0)));
     xp = E.minigame.xp[place];
     stats.mgPlayed = 1;
     if (r.won) {

@@ -3,7 +3,6 @@ import { VIEW_H, VIEW_W } from '../config/balance';
 import { keyName, settings } from '../config/settings';
 import { audio } from '../core/audio';
 import { input } from '../core/input';
-import { HYPE } from '../../shared/balance';
 import { modeInfo } from '../../shared/modes/rules';
 import type { ModeId } from '../../shared/sim/types';
 import { ensureCharTexture, Team } from '../gfx/characters';
@@ -30,10 +29,6 @@ export class RoleRevealScene extends Phaser.Scene {
   private mapId: MapId = 'forest';
   private mode: ModeId = 'pilla';
   private role: Team = 'chaser';
-  private horse = 0;
-  private horseSprites: Phaser.GameObjects.Sprite[] = [];
-  private horseLabel?: Phaser.GameObjects.BitmapText;
-  private horseSel?: Phaser.GameObjects.Graphics;
   private footer?: Phaser.GameObjects.BitmapText;
   private wheel!: Phaser.GameObjects.Container;
   private group!: Phaser.GameObjects.Container;
@@ -54,7 +49,7 @@ export class RoleRevealScene extends Phaser.Scene {
   private revealMs = 0;
   private spinMs = 3600;
 
-  init(data: { mode?: ModeId; mapId?: MapId; online?: OnlineModel; revealMs?: number; horse?: number }): void {
+  init(data: { mode?: ModeId; mapId?: MapId; online?: OnlineModel; revealMs?: number }): void {
     this.online = data.online ?? null;
     this.revealMs = data.revealMs ?? 0;
     // Online, el bando lo decide el servidor (la ruleta solo lo muestra).
@@ -62,9 +57,6 @@ export class RoleRevealScene extends Phaser.Scene {
     this.mode = this.online ? this.online.mode : (data.mode ?? 'pilla');
     const hunterChance = this.mode === 'infeccion' ? 0.3 : 0.5;
     this.role = this.online ? this.online.player().team : this.mode === 'bomba' ? 'escapist' : Math.random() < hunterChance ? 'chaser' : 'escapist';
-    this.horse = this.online ? this.online.player().horse : (data.horse ?? Math.floor(Math.random() * HYPE.horses.length));
-    this.horseSprites = [];
-    this.horseLabel = undefined;
     this.spinMs = this.online ? Math.max(900, Math.min(3600, this.revealMs - 1600)) : 3600;
     this.phase = 'spin';
     this.t = 0;
@@ -216,7 +208,7 @@ export class RoleRevealScene extends Phaser.Scene {
     const nCh = this.online ? this.online.roster.filter((r) => r.team === 'chaser').length : mode === 'pilla' ? settings.chasers : 0;
     const vs = mode === 'bomba' ? `${total} JUGADORES · QUEDA UNO` : mode === 'pilla' ? `${nCh} AZULES VS ${total - nCh} ROJOS` : `${info.hunters} VS ${info.prey}`;
     text(this, cx, 186, vs, { color: UI.muted });
-    this.buildHorses(cx);
+    text(this, cx, 204, '¡ATENTO AL PARÓN DOPAMINA A MITAD DE PARTIDA!', { color: 0xff7ab8 });
 
     this.time.delayedCall(450, () => {
       this.phase = 'ready';
@@ -225,32 +217,6 @@ export class RoleRevealScene extends Phaser.Scene {
         this.prompt = text(this, VIEW_W / 2, VIEW_H - 12, 'ENTER / ESPACIO: ¡A JUGAR!', { color: 0xffffff });
       }
     });
-  }
-
-  /** Apuesta de la carrera de caballos (online la eliges en la sala). */
-  private buildHorses(cx: number): void {
-    text(this, cx, 198, this.online ? 'TU CABALLO PARA LA CARRERA' : '← → ELIGE CABALLO PARA LA CARRERA', { color: 0xffd23f });
-    this.horseSel = this.add.graphics();
-    for (let i = 0; i < HYPE.horses.length; i++) {
-      const spr = this.add.sprite(cx - 66 + i * 44, 216, `horse_${i}`, 'f0').play(`horse_${i}_run`);
-      spr.setInteractive({ useHandCursor: true }).on('pointerup', () => this.pickHorse(i));
-      this.horseSprites.push(spr);
-    }
-    this.horseLabel = text(this, cx, 232, '', { color: 0xffffff });
-    this.pickHorse(this.horse, true);
-  }
-
-  private pickHorse(i: number, silent = false): void {
-    if (this.online) i = this.horse;
-    this.horse = (i + HYPE.horses.length) % HYPE.horses.length;
-    if (!silent) audio.play('hover');
-    this.horseSprites.forEach((s, k) => {
-      s.setScale(k === this.horse ? 1.3 : 1).setAlpha(k === this.horse ? 1 : 0.5);
-      s.anims.timeScale = k === this.horse ? 1.4 : 0.4;
-    });
-    const s = this.horseSprites[this.horse];
-    this.horseSel?.clear().lineStyle(1, 0xffd23f, 1).strokeRect(s.x - 16, s.y - 12, 32, 22);
-    this.horseLabel?.setText(HYPE.horses[this.horse]);
   }
 
   update(_t: number, delta: number): void {
@@ -271,16 +237,12 @@ export class RoleRevealScene extends Phaser.Scene {
       fadeTo(this, 'MapSelect', { mode: this.mode });
       return;
     }
-    if (this.phase === 'ready' && this.horseSprites.length) {
-      if (input.nav('left')) this.pickHorse(this.horse - 1);
-      if (input.nav('right')) this.pickHorse(this.horse + 1);
-    }
     if (input.confirm()) {
       if (this.phase === 'spin') {
         this.spin.seek(this.spinMs - 10);
       } else if (this.phase === 'ready') {
         audio.play('click');
-        fadeTo(this, 'Game', { mode: this.mode, mapId: this.mapId, role: this.role, horse: this.horse });
+        fadeTo(this, 'Game', { mode: this.mode, mapId: this.mapId, role: this.role });
       }
     }
   }

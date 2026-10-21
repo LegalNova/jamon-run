@@ -23,19 +23,12 @@ export class Hype {
   /** Efecto global activo (turbo, cabezones, doble...) y segundos que le quedan. */
   effect = '';
   effectLeft = 0;
-  private raceAt: number;
-  private raceState = 0;
-  private raceEndAt = 0;
-  /** Caballo ganador de esta partida (al azar). */
-  readonly horseWinner: number;
   private botSpinAt = new Map<number, number>();
 
   constructor(private sim: Sim) {
     const bomba = sim.mode === 'bomba';
     const minAt = sim.mode === 'escondite' ? MODES.escondite.hideSeconds + 4 : 6;
     this.spinTimes = bomba ? [...HYPE.bombaSpinsAt] : HYPE.globalSpinsAt.map((f) => Math.max(minAt, f * sim.duration));
-    this.raceAt = bomba ? HYPE.bombaRaceAt : Math.max(minAt + 6, HYPE.raceAt * sim.duration);
-    this.horseWinner = Math.floor(sim.random() * HYPE.horses.length);
     for (const c of sim.chars) {
       c.spinsLeft = HYPE.personalSpins;
       if (!c.human) this.botSpinAt.set(c.id, HYPE.personalFrom + sim.random() * 40);
@@ -118,20 +111,6 @@ export class Hype {
       }
     }
 
-    // Carrera de caballos.
-    if (this.raceState === 0 && t >= this.raceAt) {
-      this.raceState = 1;
-      this.raceEndAt = t + HYPE.raceSeconds;
-      sim.pushEvent({ t: 'race', w: this.horseWinner });
-    } else if (this.raceState === 1 && t >= this.raceEndAt) {
-      this.raceState = 2;
-      sim.pushEvent({ t: 'raceEnd', w: this.horseWinner });
-      for (const c of sim.chars) {
-        if (c.horse !== this.horseWinner) continue;
-        this.award(c.id, HYPE.coins.horse, false);
-        this.medal(c, 'SUERTUDO', false);
-      }
-    }
   }
 
   /** Tirada personal (tecla Q). */
