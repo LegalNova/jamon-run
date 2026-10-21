@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { buildCharacterTextures } from '../gfx/characters';
 import { buildFonts } from '../gfx/font';
+import { buildModeArt } from '../gfx/modeArt';
 import { makeCanvas } from '../gfx/pixel';
 import { buildPropTextures } from '../gfx/tiles';
 
@@ -14,6 +15,7 @@ export class BootScene extends Phaser.Scene {
     buildFonts(this);
     buildCharacterTextures(this);
     buildPropTextures(this);
+    buildModeArt(this);
     this.buildBackground();
     this.buildFullscreenIcon();
     this.scene.start('Title');

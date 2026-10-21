@@ -1,9 +1,11 @@
 import type { Grid } from '../../shared/grid';
-import type { BiomeId } from '../../shared/maps';
+import type { MapId } from '../../shared/maps';
 import type { MapScale } from '../../shared/mapScale';
+import type { ModeNet } from '../../shared/modes/types';
+import type { Prop } from '../../shared/props';
 import type { SimChar } from '../../shared/sim/Char';
 import { Sim } from '../../shared/sim/Sim';
-import type { HeldInput, MatchState, PickupType, RosterEntry, SimEvent, Team } from '../../shared/sim/types';
+import type { HeldInput, MatchState, ModeId, PickupType, RosterEntry, SimEvent, Team } from '../../shared/sim/types';
 import type { Difficulty } from '../config/balance';
 
 export interface PickupLike {
@@ -33,7 +35,10 @@ export interface SmokeLike {
 /** Lo que la escena de juego y el HUD leen, venga de una simulación local o de la red. */
 export interface GameModel {
   readonly online: boolean;
-  readonly mapId: BiomeId;
+  readonly mode: ModeId;
+  readonly mapId: MapId;
+  /** Objetos del mapa (Escondite). */
+  readonly props: Prop[];
   readonly scale: MapScale;
   readonly grid: Grid;
   readonly chars: SimChar[];
@@ -46,11 +51,15 @@ export interface GameModel {
   readonly duration: number;
   readonly winner: Team | null;
   readonly playerId: number;
+  /** Ganador individual (Jamón Bomba / Leyenda). */
+  readonly champion: number;
+  /** Estado del modo para el HUD. */
+  modeNet(): ModeNet;
   player(): SimChar;
   /** Avanza el modelo y devuelve los eventos ocurridos. */
   update(dt: number): SimEvent[];
   setHeld(h: HeldInput): void;
-  press(what: 'action' | 'special'): void;
+  press(what: 'action' | 'special' | 'rotate' | 'spin'): void;
   say(phrase: number): void;
   destroy(): void;
 }
@@ -61,7 +70,7 @@ export class OfflineModel implements GameModel {
   readonly sim: Sim;
 
   constructor(
-    o: { mapId: BiomeId; scale: MapScale; duration: number; difficulty: Difficulty; roster: RosterEntry[] },
+    o: { mode: ModeId; mapId: MapId; scale: MapScale; duration: number; difficulty: Difficulty; roster: RosterEntry[] },
     readonly playerId: number,
   ) {
     this.sim = new Sim(o);
@@ -69,6 +78,18 @@ export class OfflineModel implements GameModel {
 
   get mapId() {
     return this.sim.mapId;
+  }
+  get mode() {
+    return this.sim.mode;
+  }
+  get props() {
+    return this.sim.props;
+  }
+  get champion() {
+    return this.sim.champion;
+  }
+  modeNet(): ModeNet {
+    return this.sim.modeNet();
   }
   get scale() {
     return this.sim.scale;
@@ -117,7 +138,7 @@ export class OfflineModel implements GameModel {
     this.sim.setHeld(this.playerId, h);
   }
 
-  press(what: 'action' | 'special'): void {
+  press(what: 'action' | 'special' | 'rotate' | 'spin'): void {
     this.sim.press(this.playerId, what);
   }
 

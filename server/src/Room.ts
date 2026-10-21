@@ -1,5 +1,6 @@
 import { DurableObject } from 'cloudflare:workers';
-import { BALANCE, NET, PHRASES } from '../../shared/balance';
+import { BALANCE, HYPE, NET, PHRASES } from '../../shared/balance';
+import { defaultHunters, validMode } from '../../shared/modes/rules';
 import { botName, randomLook, sanitizeLook } from '../../shared/look';
 import { MAPS } from '../../shared/maps';
 import { scaleFor } from '../../shared/mapScale';
@@ -18,7 +19,7 @@ import {
   STATES,
 } from '../../shared/protocol';
 import { Sim } from '../../shared/sim/Sim';
-import type { HeldInput, Team } from '../../shared/sim/types';
+import type { HeldInput, ModeId, Team } from '../../shared/sim/types';
 import type { Look } from '../../shared/look';
 import type { Env } from './index';
 
@@ -35,6 +36,10 @@ interface Player {
   held: HeldInput;
   aCount: number;
   bCount: number;
+  oCount: number;
+  qCount: number;
+  vote: ModeId | null;
+  horse: number;
   /** Control de ritmo de mensajes de entrada. */
   winStart: number;
   winCount: number;
@@ -52,7 +57,7 @@ export class Room extends DurableObject<Env> {
   private nextId = 1;
   private hostId = -1;
   private phase: RoomPhase = 'lobby';
-  private settings: RoomSettings = { mapId: 'forest', duration: 120, botFill: 8, difficulty: 'normal', isPublic: false };
+  private settings: RoomSettings = { mode: 'voto', hunters: 0, mapId: 'forest', duration: 120, botFill: 8, difficulty: 'normal', isPublic: false };
   private sim: Sim | null = null;
   private roster: RosterNet[] = [];
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -133,6 +138,10 @@ export class Room extends DurableObject<Env> {
         held: { mx: 0, my: 0, sprint: false },
         aCount: 0,
         bCount: 0,
+        oCount: 0,
+        qCount: 0,
+        vote: null,
+        horse: -1,
         winStart: 0,
         winCount: 0,
       };
@@ -193,17 +202,39 @@ export class Room extends DurableObject<Env> {
         this.sim?.setHeld(p.id, p.held);
         const a = Math.floor(Number(msg.a) || 0);
         const b = Math.floor(Number(msg.b) || 0);
+        const o = Math.floor(Number(msg.o) || 0);
+        const q = Math.floor(Number(msg.q) || 0);
         if (a > p.aCount) this.sim?.press(p.id, 'action');
         if (b > p.bCount) this.sim?.press(p.id, 'special');
+        if (o > p.oCount) this.sim?.press(p.id, 'rotate');
+        if (q > p.qCount) this.sim?.press(p.id, 'spin');
         p.aCount = Math.max(p.aCount, a);
         p.bCount = Math.max(p.bCount, b);
+        p.oCount = Math.max(p.oCount, o);
+        p.qCount = Math.max(p.qCount, q);
         break;
       }
       case 'say': {
-        const c = this.sim?.byId.get(p.id);
-        if (c && (PHRASES.wheel[c.team] as readonly number[]).includes(msg.p)) this.sim!.say(p.id, msg.p);
+        const sim = this.sim;
+        const c = sim?.byId.get(p.id);
+        if (!sim || !c) break;
+        const mw = sim.mode === 'pilla' ? null : PHRASES.modeWheel[sim.mode];
+        const wheel = (mw ? mw[c.team] : PHRASES.wheel[c.team]) as readonly number[];
+        if (wheel.includes(msg.p)) sim.say(p.id, msg.p);
         break;
       }
+      case 'vote':
+        if (this.phase === 'lobby' && validMode(msg.m)) {
+          p.vote = msg.m;
+          this.broadcastLobby();
+        }
+        break;
+      case 'horse':
+        if (this.phase === 'lobby' && Number.isInteger(msg.h) && msg.h >= 0 && msg.h < HYPE.horses.length) {
+          p.horse = msg.h;
+          this.broadcastLobby();
+        }
+        break;
       case 'ping':
         if (p.ws) this.send(p.ws, { t: 'pong', c: Number(msg.c) || 0, ts: Date.now() });
         break;
@@ -248,6 +279,8 @@ export class Room extends DurableObject<Env> {
   }
 
   private applySettings(s: Partial<RoomSettings>): void {
+    if (s.mode === 'voto' || validMode(s.mode)) this.settings.mode = s.mode;
+    if (typeof s.hunters === 'number' && (NET.huntersOptions as readonly number[]).includes(s.hunters)) this.settings.hunters = s.hunters;
     if (s.mapId && MAPS.some((m) => m.id === s.mapId)) this.settings.mapId = s.mapId;
     if (typeof s.duration === 'number' && (NET.durationOptions as readonly number[]).includes(s.duration)) this.settings.duration = s.duration;
     if (typeof s.botFill === 'number' && (NET.botFillOptions as readonly number[]).includes(s.botFill)) this.settings.botFill = s.botFill;
@@ -269,8 +302,10 @@ export class Room extends DurableObject<Env> {
       this.sendTo(this.hostId, { t: 'error', msg: 'HACEN FALTA 2 JUGADORES O BOTS' });
       return;
     }
-    // Equipos al azar: más o menos 1 azul por cada 3 rojos.
-    const nChasers = Math.max(1, Math.round(total / (1 + NET.escapistsPerChaser)));
+    const mode = this.resolveMode(humans);
+    // Equipos al azar: cuántos cazadores depende del modo (o lo fija el anfitrión).
+    const auto = defaultHunters(mode, total);
+    const nChasers = mode === 'bomba' ? 0 : this.settings.hunters > 0 ? Math.min(total - 1, this.settings.hunters) : auto;
     const slots: { human: Player | null }[] = [...humans.map((h) => ({ human: h as Player | null }))];
     while (slots.length < total) slots.push({ human: null });
     for (let i = slots.length - 1; i > 0; i--) {
@@ -281,12 +316,14 @@ export class Room extends DurableObject<Env> {
     let bi = Math.floor(Math.random() * 20);
     this.roster = slots.map((s, i) => {
       const team: Team = i < nChasers ? 'chaser' : 'escapist';
-      if (s.human) return { id: s.human.id, name: s.human.name, team, look: s.human.look, human: true };
+      if (s.human) return { id: s.human.id, name: s.human.name, team, look: s.human.look, human: true, horse: s.human.horse >= 0 ? s.human.horse : Math.floor(Math.random() * HYPE.horses.length) };
       const name = botName(bi++);
-      return { id: botId++, name: `${name}`, team, look: randomLook(name), human: false };
+      return { id: botId++, name: `${name}`, team, look: randomLook(name), human: false, horse: Math.floor(Math.random() * HYPE.horses.length) };
     });
-    const scale = scaleFor(total);
-    this.sim = new Sim({ mapId: this.settings.mapId, scale, duration: this.settings.duration, difficulty: this.settings.difficulty, roster: this.roster });
+    const scale = scaleFor(total, this.settings.mapId);
+    this.sim = new Sim({ mode, mapId: this.settings.mapId, scale, duration: this.settings.duration, difficulty: this.settings.difficulty, roster: this.roster });
+    // El modo puede cambiar los equipos (Jamón Bomba: todos contra todos).
+    for (const r of this.roster) r.team = this.sim.byId.get(r.id)?.team ?? r.team;
     for (const p of humans) this.sim.setHeld(p.id, { mx: 0, my: 0, sprint: false });
     this.phase = 'reveal';
     this.revealUntil = Date.now() + REVEAL_MS;
@@ -298,10 +335,23 @@ export class Room extends DurableObject<Env> {
     this.startLoop();
   }
 
+  /** Modo de la partida: el del anfitrión o el más votado (empate: al azar). */
+  private resolveMode(humans: Player[]): ModeId {
+    if (this.settings.mode !== 'voto') return this.settings.mode;
+    const count = new Map<ModeId, number>();
+    for (const h of humans) if (h.vote) count.set(h.vote, (count.get(h.vote) ?? 0) + 1);
+    if (!count.size) return 'pilla';
+    const max = Math.max(...count.values());
+    const top = [...count.entries()].filter(([, n]) => n === max).map(([m]) => m);
+    return top[Math.floor(Math.random() * top.length)];
+  }
+
   private sendStart(p: Player): void {
     if (!this.sim || !p.ws) return;
     this.send(p.ws, {
       t: 'start',
+      mode: this.sim.mode,
+      seed: this.sim.seed,
       mapId: this.sim.mapId,
       scale: this.sim.scale,
       duration: this.sim.duration,
@@ -369,6 +419,7 @@ export class Room extends DurableObject<Env> {
       j: sim.projectiles.map((p) => [p.pid, Math.round(p.x), Math.round(p.y), Math.round(p.dx * 100), Math.round(p.dy * 100), Math.round(p.travelled)]),
       k: sim.smokes.map((s) => [s.sid, Math.round(s.x), Math.round(s.y), Math.round(s.life * 10)]),
       w: [Math.round(sim.wind.x * 10), Math.round(sim.wind.y * 10)],
+      ms: sim.modeNet(),
       e: events,
     };
     const common = JSON.stringify(snap);
@@ -386,6 +437,7 @@ export class Room extends DurableObject<Env> {
           en: Math.round(c.energy),
           bt: Math.round(Math.max(0, c.bootTime) * 10) / 10,
           el: c.stats.eliminations,
+          sp: c.spinsLeft,
         };
         me = `,"m":${JSON.stringify(m)}`;
       }
@@ -396,13 +448,17 @@ export class Room extends DurableObject<Env> {
   private finishMatch(sim: Sim): void {
     const msg: ServerMsg = {
       t: 'results',
+      mode: sim.mode,
       winner: sim.winner ?? 'escapist',
+      champion: sim.champion,
+      horse: sim.hype.horseWinner,
       timePlayed: sim.matchTime,
       duration: sim.duration,
       mapId: sim.mapId,
       entries: sim.chars.map((c) => ({ id: c.id, name: c.name, team: c.team, alive: c.alive, human: !!this.roster.find((r) => r.id === c.id)?.human, look: c.look, stats: c.stats })),
     };
     for (const p of this.players) if (p.ws) this.send(p.ws, msg);
+    void this.recordRank(sim);
     this.stopLoop(false);
     this.sim = null;
     this.phase = 'lobby';
@@ -414,7 +470,7 @@ export class Room extends DurableObject<Env> {
   // ------------------------------------------------------------------ envío
 
   private lobbyPlayers(): LobbyPlayer[] {
-    return this.players.map((p) => ({ id: p.id, name: p.name, look: p.look, ready: p.ready, host: p.id === this.hostId, connected: p.connected }));
+    return this.players.map((p) => ({ id: p.id, name: p.name, look: p.look, ready: p.ready, host: p.id === this.hostId, connected: p.connected, vote: p.vote, horse: p.horse }));
   }
 
   private broadcastLobby(): void {
@@ -439,6 +495,18 @@ export class Room extends DurableObject<Env> {
       ws.send(data);
     } catch {
       /* conexión cerrada */
+    }
+  }
+
+  /** Ranking mundial: solo cuentan las personas (no los bots). */
+  private async recordRank(sim: Sim): Promise<void> {
+    const humans = sim.chars.filter((c) => this.roster.find((r) => r.id === c.id)?.human);
+    if (!humans.length) return;
+    try {
+      const mm = this.env.MATCHMAKER.get(this.env.MATCHMAKER.idFromName('global'));
+      await mm.record(sim.mode, humans.map((c) => ({ name: c.name, coins: c.stats.coins })));
+    } catch {
+      /* no es crítico */
     }
   }
 

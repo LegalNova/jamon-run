@@ -8,6 +8,9 @@ export const PICKUP_NAMES: Record<PickupType, string> = {
   boot: 'BOTA VELOZ',
   shield: 'ESCUDO',
   gold: 'JAMÓN DE ORO',
+  barrier: 'BARRERA (E)',
+  grenade: 'GRANADA DE HUMO (E)',
+  coin: 'MONEDA',
 };
 
 export const PICKUP_COLORS: Record<PickupType, number> = {
@@ -15,6 +18,9 @@ export const PICKUP_COLORS: Record<PickupType, number> = {
   boot: 0xfee761,
   shield: 0x7cc8ff,
   gold: 0xffd23f,
+  barrier: 0xfeae34,
+  grenade: 0xc2c3c7,
+  coin: 0xffd23f,
 };
 
 /** Objeto en el suelo que flota y parpadea antes de desaparecer. */
@@ -29,10 +35,24 @@ export class PickupView {
     this.glow = scene.add.image(p.x, p.y - 4, 'p_ring').setTint(PICKUP_COLORS[p.type]).setAlpha(0.5).setDepth(p.y - 1);
     this.sprite = scene.add.image(p.x, p.y - 4, 'item_' + p.type).setDepth(p.y).setScale(0);
     scene.tweens.add({ targets: this.sprite, scale: 1, duration: 280, ease: 'Back.easeOut' });
+    this.coin = p.type === 'coin';
+    if (this.coin) {
+      this.glow.setVisible(false);
+      this.sprite.y -= 20;
+    }
   }
+
+  private coin = false;
 
   update(dt: number, p: PickupLike): void {
     this.t += dt;
+    if (this.coin) {
+      // Las monedas caen del cielo y giran.
+      const target = p.y - 5 + Math.round(Math.sin(this.t * 6) * 1);
+      this.sprite.y = Math.min(target, this.sprite.y + dt * 160);
+      this.sprite.scaleX = Math.cos(this.t * 7);
+      return;
+    }
     const bob = Math.round(Math.sin(this.t * 4) * 1.5);
     this.sprite.y = p.y - 5 + bob;
     this.glow.y = p.y - 5 + bob;
@@ -44,6 +64,35 @@ export class PickupView {
     this.sprite.destroy();
     this.shadow.destroy();
     this.glow.destroy();
+  }
+}
+
+/** Objeto del mapa en el Escondite (mismo dibujo y ancla que un escondido disfrazado). */
+export class PropView {
+  readonly sprite: Phaser.GameObjects.Image;
+  private shadow: Phaser.GameObjects.Image;
+  private wobble = 0;
+
+  constructor(scene: Phaser.Scene, readonly x: number, readonly y: number, k: number, rot: number) {
+    this.shadow = scene.add.image(x, y + 3, 'shadow').setAlpha(0.28).setDepth(-600);
+    this.sprite = scene.add.image(x, y + 3, `prop_${k}_${rot}`).setOrigin(0.5, 19 / 20).setDepth(y);
+  }
+
+  /** Golpe de un buscador: tiembla (es un objeto de verdad). */
+  hit(): void {
+    this.wobble = 0.4;
+  }
+
+  update(dt: number): void {
+    if (this.wobble <= 0) return;
+    this.wobble -= dt;
+    this.sprite.x = this.x + Math.round(Math.sin(this.wobble * 60) * 1.5);
+    if (this.wobble <= 0) this.sprite.x = this.x;
+  }
+
+  destroy(): void {
+    this.sprite.destroy();
+    this.shadow.destroy();
   }
 }
 

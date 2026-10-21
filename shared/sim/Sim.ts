@@ -1,11 +1,14 @@
-import { AIParams, BALANCE, CITY, Difficulty, PHRASES, RESCUE, TILE } from '../balance';
+import { AIParams, BALANCE, CITY, Difficulty, HYPE, PHRASES, TILE } from '../balance';
 import { resolveCircle } from '../collision';
 import { DistField, Grid, SHOT_BLOCKERS, Terrain } from '../grid';
-import { BiomeId } from '../maps';
+import { MapId } from '../maps';
 import { buildRows, MapScale } from '../mapScale';
+import { abilityFor, canMoveFor, createMode, emptyModeNet, GameMode, ModeNet, speedMulFor } from '../modes';
+import { buildProps, Prop } from '../props';
 import { BotBrain, BotWorld } from './Bot';
 import { SimChar, wrapAngle, PRESS_BUFFER } from './Char';
-import { emptyIntent, HeldInput, Intent, MatchState, PickupType, RosterEntry, SimCtx, SimEvent, Team } from './types';
+import { Hype } from './Hype';
+import { Ability, emptyIntent, HeldInput, Intent, MatchState, ModeId, PickupType, RosterEntry, SimCtx, SimEvent, Team } from './types';
 
 
 export class SimProjectile {
@@ -31,11 +34,21 @@ export class SimPickup {
 }
 
 export interface SimOptions {
-  mapId: BiomeId;
+  mapId: MapId;
   scale: MapScale;
   duration: number;
   difficulty: Difficulty;
   roster: RosterEntry[];
+  mode?: ModeId;
+  /** Semilla de los objetos del mapa (Escondite). */
+  seed?: number;
+}
+
+/** Hint sonoro reciente (la IA de los buscadores lo usa). */
+export interface HintMark {
+  x: number;
+  y: number;
+  t: number;
 }
 
 /**
@@ -44,7 +57,18 @@ export interface SimOptions {
  */
 export class Sim implements SimCtx, BotWorld {
   readonly grid: Grid;
-  readonly mapId: BiomeId;
+  readonly mapId: MapId;
+  readonly mode: ModeId;
+  readonly modeImpl: GameMode;
+  readonly hype: Hype;
+  readonly seed: number;
+  /** Objetos del mapa (Escondite). */
+  readonly props: Prop[];
+  /** Fase del modo (Escondite: 0 = esconderse). */
+  phase = 1;
+  /** Ganador individual (Jamón Bomba, Leyenda de Infección). */
+  champion = -1;
+  hints: HintMark[] = [];
   readonly scale: MapScale;
   readonly ai: AIParams;
   readonly duration: number;
@@ -76,15 +100,35 @@ export class Sim implements SimCtx, BotWorld {
   private windOn = false;
   private windDir = -1;
   private streaks = new Map<number, { t: number; n: number }>();
+  private barriers: { tiles: number[]; t: number }[] = [];
 
   constructor(o: SimOptions) {
     this.mapId = o.mapId;
     this.scale = o.scale;
+    this.mode = o.mode ?? 'pilla';
+    this.seed = o.seed ?? Math.floor(Math.random() * 1e9);
     this.grid = new Grid(buildRows(o.mapId, o.scale));
     this.ai = BALANCE.ai[o.difficulty];
-    this.duration = o.duration;
-    this.timeLeft = o.duration;
+    // Jamón Bomba va por rondas: el tiempo es solo un tope de seguridad.
+    this.duration = this.mode === 'bomba' ? 600 : o.duration;
+    this.timeLeft = this.duration;
+    this.props = this.mode === 'escondite' ? buildProps(this.grid, this.seed) : [];
+    this.modeImpl = createMode(this.mode);
     this.spawn(o.roster);
+    this.modeImpl.setup(this);
+    this.hype = new Hype(this);
+  }
+
+  random(): number {
+    return Math.random();
+  }
+
+  isHunter(c: SimChar): boolean {
+    return this.modeImpl.isHunter(c);
+  }
+
+  canPickup(c: SimChar, type: PickupType): boolean {
+    return type === 'coin' || this.modeImpl.canPickup(c, type);
   }
 
   // ------------------------------------------------------------------ preparación
@@ -139,6 +183,7 @@ export class Sim implements SimCtx, BotWorld {
 
   private add(r: RosterEntry, x: number, y: number): void {
     const c = new SimChar({ id: r.id, team: r.team, name: r.name, look: r.look, human: r.human, x, y });
+    c.horse = r.horse ?? Math.floor(Math.random() * HYPE.horses.length);
     this.chars.push(c);
     this.byId.set(c.id, c);
     if (!r.human) this.brains.set(c.id, new BotBrain(c, this));
@@ -151,11 +196,13 @@ export class Sim implements SimCtx, BotWorld {
     this.held.set(id, l > 1 ? { mx: h.mx / l, my: h.my / l, sprint: h.sprint } : h);
   }
 
-  press(id: number, what: 'action' | 'special'): void {
+  press(id: number, what: 'action' | 'special' | 'rotate' | 'spin'): void {
     const c = this.byId.get(id);
     if (!c) return;
     if (what === 'action') c.actionBuf = PRESS_BUFFER;
-    else c.specialBuf = PRESS_BUFFER;
+    else if (what === 'special') c.specialBuf = PRESS_BUFFER;
+    else if (what === 'rotate') this.modeImpl.rotate(this, c);
+    else this.hype.spin(id);
   }
 
   /** Pasa un personaje a control humano o a bot (p. ej. al desconectarse). */
@@ -167,10 +214,17 @@ export class Sim implements SimCtx, BotWorld {
     if (human) this.held.set(id, { mx: 0, my: 0, sprint: false });
   }
 
+  /** Evento sin efectos secundarios (monedas, frases...). */
+  pushEvent(e: SimEvent): void {
+    this.events.push(e);
+  }
+
   emit(e: SimEvent): void {
     this.events.push(e);
+    if (e.t === 'hint') this.hints.push({ x: e.x, y: e.y, t: this.matchTime });
     this.autoSay(e);
-    if (e.t === 'trap' && e.a >= 0) {
+    this.hype.onEvent(e);
+    if ((e.t === 'trap' || e.t === 'infect' || (e.t === 'ko' && this.mode === 'escondite')) && e.a >= 0) {
       const s = this.streaks.get(e.a);
       const n = s && this.matchTime - s.t < CITY.streakWindow ? s.n + 1 : 1;
       this.streaks.set(e.a, { t: this.matchTime, n });
@@ -210,8 +264,38 @@ export class Sim implements SimCtx, BotWorld {
     } else if (e.t === 'dodge') {
       this.sayMaybe(e.v, ch.dodge, [5, 21]);
     } else if (e.t === 'release') {
-      for (const c of this.chars) if (c.isChaser) this.sayMaybe(c.id, ch.release, [0, 1, 16]);
+      for (const c of this.chars) if (c.isChaser) this.sayMaybe(c.id, ch.release, this.mode === 'infeccion' ? [23, 16] : [0, 1, 16]);
+    } else if (e.t === 'infect') {
+      const v = this.byId.get(e.v);
+      if (v) v.sayCd = 0;
+      this.sayMaybe(e.v, ch.ko * 0.7, [23, 4]);
+    } else if (e.t === 'pass') {
+      this.sayMaybe(e.from, ch.hit, [25, 11]);
+    } else if (e.t === 'round') {
+      for (const id of e.ids) this.sayMaybe(id, ch.ko, [26, 4]);
+    } else if (e.t === 'seek') {
+      for (const c of this.chars) if (c.isChaser) this.sayMaybe(c.id, ch.release, [27, 0, 16]);
+    } else if (e.t === 'last') {
+      this.sayMaybe(e.id, 1, [24]);
     }
+  }
+
+  /** Da monedas (con combo si encadenas acciones). */
+  award(id: number, n: number, combo = true): number {
+    return this.hype.award(id, n, combo);
+  }
+
+  medal(c: SimChar, m: string): void {
+    this.hype.medal(c, m);
+  }
+
+  /** Datos del modo para el HUD (y la red). */
+  modeNet(): ModeNet {
+    const out = emptyModeNet();
+    this.modeImpl.net(this, out);
+    out.fx = this.hype.effect;
+    out.ft = Math.max(0, Math.ceil(this.hype.effectLeft));
+    return out;
   }
 
   /** Devuelve y vacía la lista de eventos pendientes. */
@@ -225,8 +309,34 @@ export class Sim implements SimCtx, BotWorld {
 
   canMove(c: { team: Team }): boolean {
     if (this.state !== 'play') return false;
-    if (c.team === 'chaser' && this.matchTime < BALANCE.match.chaserReleaseDelay) return false;
-    return true;
+    return canMoveFor(this.mode, c.team, this.matchTime, this.phase);
+  }
+
+  canMoveTeam(team: Team): boolean {
+    return this.canMove({ team });
+  }
+
+  ability(c: Parameters<SimCtx['ability']>[0], slot: 'action' | 'special'): Ability {
+    return abilityFor(this.mode, c, slot);
+  }
+
+  speedMul(c: Parameters<SimCtx['speedMul']>[0]): number {
+    return speedMulFor(this.mode, c) * (this.hype.effect === 'turbo' ? HYPE.turboSpeed : 1);
+  }
+
+  useItem(id: number): void {
+    const c = this.byId.get(id);
+    if (c && c.alive) this.modeImpl.useItem(this, c);
+  }
+
+  disguise(id: number): void {
+    const c = this.byId.get(id);
+    if (c && c.alive) this.modeImpl.disguise(this, c);
+  }
+
+  downed(victimId: number, attackerId: number): void {
+    const v = this.byId.get(victimId);
+    if (v) this.modeImpl.onDowned(this, v, this.byId.get(attackerId) ?? null);
   }
 
   inSmoke(x: number, y: number): boolean {
@@ -235,6 +345,8 @@ export class Sim implements SimCtx, BotWorld {
   }
 
   canSee(viewer: SimChar, target: SimChar): boolean {
+    if (target.disguise >= 0 || target.invisible > 0) return false;
+    if (this.mode === 'escondite' && viewer.isChaser && this.phase === 0) return false;
     const d = Math.hypot(target.x - viewer.x, target.y - viewer.y);
     if (target.inBush && d > BALANCE.terrain.bushRevealDistance && target.speedNow < 60) return false;
     if (this.inSmoke(target.x, target.y) && d > 18) return false;
@@ -244,7 +356,7 @@ export class Sim implements SimCtx, BotWorld {
   dangerField(): DistField {
     if (!this.danger || this.dangerTimer <= 0) {
       const g = this.grid;
-      const src = this.chars.filter((c) => c.alive && c.isChaser).map((c) => g.nearestWalkable(c.x, c.y));
+      const src = this.chars.filter((c) => c.alive && this.isHunter(c)).map((c) => g.nearestWalkable(c.x, c.y));
       this.danger = g.dijkstra(src);
       this.dangerTimer = 0.25;
     }
@@ -255,8 +367,9 @@ export class Sim implements SimCtx, BotWorld {
     const a = this.byId.get(attackerId);
     if (!a) return;
     const C = BALANCE.chaser;
+    const victims: SimChar[] = [];
     for (const c of this.chars) {
-      if (!c.free || c.isChaser) continue;
+      if (!this.modeImpl.canHit(a, c)) continue;
       const dx = c.x - a.x;
       const dy = c.y - a.y;
       const d = Math.hypot(dx, dy);
@@ -266,8 +379,9 @@ export class Sim implements SimCtx, BotWorld {
       if (!this.grid.lineOfSight(a.x, a.y, c.x, c.y)) continue;
       const nx = d > 0.01 ? dx / d : a.fx;
       const ny = d > 0.01 ? dy / d : a.fy;
-      c.takeHit(this, C.attackDamage, a, nx, ny, C.attackKnockback);
+      if (c.takeHit(this, this.modeImpl.meleeDamage(), a, nx, ny, C.attackKnockback) === 'hit') victims.push(c);
     }
+    this.modeImpl.afterMelee(this, a, victims);
   }
 
   throwHam(attackerId: number, x: number, y: number, dx: number, dy: number): void {
@@ -299,14 +413,16 @@ export class Sim implements SimCtx, BotWorld {
     if (this.state === 'play') {
       this.matchTime += dt;
       this.timeLeft = Math.max(0, this.timeLeft - dt);
-      if (!this.released && this.matchTime >= BALANCE.match.chaserReleaseDelay) {
+      if (!this.released && this.matchTime >= BALANCE.match.chaserReleaseDelay && (this.mode === 'pilla' || this.mode === 'infeccion')) {
         this.released = true;
         this.emit({ t: 'release' });
       }
-      for (const c of this.chars) if (c.free && !c.isChaser) c.stats.timeSurvived += dt;
+      this.modeImpl.tick(this, dt);
+      this.hype.tick(dt);
       this.updateItems(dt);
-      this.updateRescues(dt);
+      this.updateBarriers(dt);
       this.updateCity(dt);
+      this.hints = this.hints.filter((h) => this.matchTime - h.t < 8);
     }
 
     this.dangerTimer -= dt;
@@ -390,12 +506,12 @@ export class Sim implements SimCtx, BotWorld {
           this.endProjectile(p, true);
           break;
         }
+        const owner = this.byId.get(p.owner) ?? null;
         for (const c of this.chars) {
-          if (!c.free || c.isChaser) continue;
+          if (!owner || !this.modeImpl.canHit(owner, c)) continue;
           if (Math.hypot(c.x - p.x, c.y - p.y) < c.radius + 5) {
-            const owner = this.byId.get(p.owner) ?? null;
             const r = c.takeHit(this, C.throwDamage, owner, p.dx, p.dy, C.throwKnockback);
-            if (r === 'hit' && owner) owner.stats.throwsHit++;
+            if (r === 'hit') owner.stats.throwsHit++;
             if (r !== 'none') {
               this.endProjectile(p, false);
               break;
@@ -419,27 +535,96 @@ export class Sim implements SimCtx, BotWorld {
       if (p.life <= 0) p.dead = true;
     }
     this.pickups = this.pickups.filter((p) => !p.dead);
+    const weights = this.modeImpl.itemWeights;
+    if (!weights) return;
     this.itemTimer -= dt;
     if (this.itemTimer > 0) return;
     this.itemTimer = BALANCE.items.spawnInterval * (0.8 + Math.random() * 0.4);
     // En mapas grandes caben más objetos.
     const max = BALANCE.items.maxOnMap * this.scale.sx * this.scale.sy;
-    if (this.pickups.length >= max) return;
+    if (this.pickups.filter((p) => p.type !== 'coin').length >= max) return;
     const g = this.grid;
     const used = new Set(this.pickups.map((p) => p.spawnIndex));
     const free = g.itemSpawns.filter((t) => !used.has(t));
     if (!free.length) return;
     const t = free[Math.floor(Math.random() * free.length)];
-    const w = BALANCE.items.weights;
-    let r = Math.random() * (w.medkit + w.boot + w.shield + w.gold);
-    let type: PickupType = 'gold';
-    if ((r -= w.medkit) < 0) type = 'medkit';
-    else if ((r -= w.boot) < 0) type = 'boot';
-    else if ((r -= w.shield) < 0) type = 'shield';
-    const c = g.tileCenter(t);
+    const entries = Object.entries(weights) as [PickupType, number][];
+    let r = Math.random() * entries.reduce((a, [, w]) => a + w, 0);
+    let type = entries[entries.length - 1][0];
+    for (const [k, w] of entries) {
+      if ((r -= w) < 0) {
+        type = k;
+        break;
+      }
+    }
+    this.spawnPickup(type, t);
+  }
+
+  private spawnPickup(type: PickupType, t: number): void {
+    const c = this.grid.tileCenter(t);
     const p = new SimPickup(this.nextIid++, type, c.x, c.y, t);
+    if (type === 'coin') p.life = HYPE.effectSeconds + 5;
     this.pickups.push(p);
     this.emit({ t: 'itemSpawn', iid: p.iid, type, x: c.x, y: c.y });
+  }
+
+  /** Ruleta: lluvia de monedas por todo el mapa. */
+  coinRain(n: number): void {
+    const g = this.grid;
+    const used = new Set(this.pickups.map((p) => p.spawnIndex));
+    // Cerca de los jugadores vivos, para que se note.
+    const alive = this.chars.filter((c) => c.alive);
+    for (let k = 0; k < n * 3 && n > 0; k++) {
+      const who = alive[Math.floor(Math.random() * alive.length)];
+      if (!who) break;
+      const tx = Math.floor(who.x / TILE) + Math.floor(Math.random() * 13) - 6;
+      const ty = Math.floor(who.y / TILE) + Math.floor(Math.random() * 9) - 4;
+      if (!g.walkable(tx, ty)) continue;
+      const t = g.idx(tx, ty);
+      if (used.has(t) || g.terrain[t] === Terrain.Water) continue;
+      used.add(t);
+      this.spawnPickup('coin', t);
+      n--;
+    }
+  }
+
+  /** Ruleta: cambiazo, todos intercambian posiciones. */
+  shufflePositions(): void {
+    const cs = this.chars.filter((c) => c.alive && c.trapped <= 0);
+    const pos = cs.map((c) => ({ x: c.x, y: c.y }));
+    for (let i = pos.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [pos[i], pos[j]] = [pos[j], pos[i]];
+    }
+    cs.forEach((c, i) => {
+      const x0 = c.x;
+      const y0 = c.y;
+      c.x = pos[i].x;
+      c.y = pos[i].y;
+      c.vx = c.vy = c.kbx = c.kby = 0;
+      c.invuln = Math.max(c.invuln, 1);
+      this.pushEvent({ t: 'metro', id: c.id, x0: Math.round(x0), y0: Math.round(y0), x1: Math.round(c.x), y1: Math.round(c.y) });
+    });
+  }
+
+  /** Barrera temporal (Infección). */
+  barrier(tiles: number[], seconds: number): void {
+    const done = this.grid.setBarrier(tiles, true);
+    if (!done.length) return;
+    this.barriers.push({ tiles: done, t: seconds });
+    this.danger = null;
+    this.emit({ t: 'barrier', tiles: done, on: true });
+  }
+
+  private updateBarriers(dt: number): void {
+    for (const b of this.barriers) {
+      b.t -= dt;
+      if (b.t <= 0) {
+        this.grid.setBarrier(b.tiles, false);
+        this.emit({ t: 'barrier', tiles: b.tiles, on: false });
+      }
+    }
+    this.barriers = this.barriers.filter((b) => b.t > 0);
   }
 
   private collectPickups(): void {
@@ -447,55 +632,17 @@ export class Sim implements SimCtx, BotWorld {
       if (p.dead) continue;
       for (const c of this.chars) {
         if (!c.free || Math.hypot(c.x - p.x, c.y - p.y) > 11) continue;
-        if (p.type === 'medkit' && (c.isChaser || c.hp >= c.maxHp)) continue;
-        if (p.type === 'shield' && (c.isChaser || c.shield)) continue;
-        if (p.type === 'gold' && c.isChaser) continue;
-        if (p.type === 'medkit') c.heal(BALANCE.items.medkitHeal);
-        else if (p.type === 'boot') c.bootTime = BALANCE.items.bootDuration;
-        else if (p.type === 'shield') c.shield = true;
-        else {
-          // Jamón de oro: libera a todos los compañeros atrapados.
-          for (const t of this.chars) {
-            if (t.trapped > 0 && !t.isChaser) {
-              t.release();
-              c.stats.rescues++;
-              this.emit({ t: 'rescue', v: t.id, by: c.id });
-            }
-          }
-          this.say(c.id, 22);
+        if (p.type !== 'coin') {
+          if (!this.modeImpl.canPickup(c, p.type)) continue;
+          this.modeImpl.onPickup(this, c, p.type);
+          c.stats.items++;
         }
-        c.stats.items++;
         p.dead = true;
         this.emit({ t: 'pickup', iid: p.iid, id: c.id, type: p.type, x: p.x, y: p.y });
         break;
       }
     }
     this.pickups = this.pickups.filter((p) => !p.dead);
-  }
-
-  /** Rojos atrapados: se liberan si un compañero se queda a su lado; si no, quedan fuera. */
-  private updateRescues(dt: number): void {
-    for (const c of this.chars) {
-      if (c.trapped <= 0) continue;
-      c.trapped -= dt;
-      let rescuer: SimChar | null = null;
-      for (const o of this.chars) {
-        if (o === c || o.isChaser || !o.free) continue;
-        if (Math.hypot(o.x - c.x, o.y - c.y) <= RESCUE.radius) {
-          rescuer = o;
-          break;
-        }
-      }
-      if (rescuer) c.rescueProg += dt / RESCUE.rescueTime;
-      else c.rescueProg = Math.max(0, c.rescueProg - RESCUE.decay * dt);
-      if (rescuer && c.rescueProg >= 1) {
-        c.release();
-        rescuer.stats.rescues++;
-        this.emit({ t: 'rescue', v: c.id, by: rescuer.id });
-      } else if (c.trapped <= 0) {
-        c.knockOut(this, c.trappedBy);
-      }
-    }
   }
 
   /** Mecánicas de las ciudades: metro (París) y levante (Ceuta). */
@@ -538,14 +685,15 @@ export class Sim implements SimCtx, BotWorld {
   }
 
   private checkEnd(): void {
-    const aliveEsc = this.chars.some((c) => c.free && !c.isChaser);
-    if (!aliveEsc) this.end('chaser');
-    else if (this.timeLeft <= 0) this.end('escapist');
+    this.modeImpl.checkEnd(this);
   }
 
-  private end(winner: Team): void {
+  end(winner: Team, champion = -1): void {
+    if (this.state === 'ended') return;
     this.state = 'ended';
     this.winner = winner;
-    this.emit({ t: 'end', winner });
+    this.champion = champion;
+    this.hype.finish(winner);
+    this.emit({ t: 'end', winner, ch: champion });
   }
 }

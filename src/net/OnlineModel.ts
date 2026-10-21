@@ -1,11 +1,14 @@
-import { BALANCE, NET } from '../../shared/balance';
+import { BALANCE, HYPE, NET } from '../../shared/balance';
 import { resolveCircle } from '../../shared/collision';
 import { Grid } from '../../shared/grid';
-import type { BiomeId } from '../../shared/maps';
+import type { MapId } from '../../shared/maps';
 import { buildRows, MapScale } from '../../shared/mapScale';
-import { F, PICKUPS, ResultNet, ServerMsg, SnapshotNet, STATES } from '../../shared/protocol';
+import { abilityFor, canMoveFor, speedMulFor } from '../../shared/modes/rules';
+import { emptyModeNet, ModeNet } from '../../shared/modes/types';
+import { buildProps, Prop } from '../../shared/props';
+import { F, F2, MeNet, PICKUPS, ResultNet, ServerMsg, SnapshotNet, STATES } from '../../shared/protocol';
 import { PRESS_BUFFER, SimChar } from '../../shared/sim/Char';
-import { emptyIntent, HeldInput, MatchState, SimCtx, SimEvent, Team } from '../../shared/sim/types';
+import { emptyIntent, HeldInput, MatchState, ModeId, SimCtx, SimEvent, Team } from '../../shared/sim/types';
 import type { GameModel, PickupLike, ProjectileLike, SmokeLike } from '../game/model';
 import { net } from './NetClient';
 
@@ -21,6 +24,7 @@ interface Snap {
   j: number[][];
   k: number[][];
   w: [number, number];
+  ms: ModeNet;
 }
 
 const INPUT_INTERVAL = 1000 / NET.inputRate;
@@ -33,7 +37,11 @@ const INPUT_INTERVAL = 1000 / NET.inputRate;
  */
 export class OnlineModel implements GameModel {
   readonly online = true;
-  readonly mapId: BiomeId;
+  readonly mode: ModeId;
+  readonly props: Prop[];
+  readonly mapId: MapId;
+  champion = -1;
+  private ms: ModeNet = emptyModeNet();
   readonly scale: MapScale;
   readonly grid: Grid;
   readonly duration: number;
@@ -46,7 +54,7 @@ export class OnlineModel implements GameModel {
   timeLeft: number;
   matchTime = 0;
   winner: Team | null = null;
-  results: { winner: Team; timePlayed: number; duration: number; entries: ResultNet[] } | null = null;
+  results: { mode: ModeId; winner: Team; champion: number; horse: number; timePlayed: number; duration: number; entries: ResultNet[] } | null = null;
   readonly roster: StartMsg['roster'];
 
   private byId = new Map<number, SimChar>();
@@ -57,7 +65,9 @@ export class OnlineModel implements GameModel {
   private held: HeldInput = { mx: 0, my: 0, sprint: false };
   private aCount = 0;
   private bCount = 0;
-  private lastSent = { x: 0, y: 0, r: 0, a: 0, b: 0 };
+  private oCount = 0;
+  private qCount = 0;
+  private lastSent = { x: 0, y: 0, r: 0, a: 0, b: 0, o: 0, q: 0 };
   private lastSendAt = 0;
   private unsub: () => void;
   private ctx: SimCtx;
@@ -66,6 +76,7 @@ export class OnlineModel implements GameModel {
   private haveSnap = false;
 
   constructor(start: StartMsg) {
+    this.mode = start.mode ?? 'pilla';
     this.mapId = start.mapId;
     this.scale = start.scale;
     this.duration = start.duration;
@@ -73,8 +84,11 @@ export class OnlineModel implements GameModel {
     this.playerId = start.you;
     this.roster = start.roster;
     this.grid = new Grid(buildRows(start.mapId, start.scale));
+    this.props = this.mode === 'escondite' ? buildProps(this.grid, start.seed) : [];
     for (const r of start.roster) {
       const c = new SimChar({ id: r.id, team: r.team, name: r.name, look: r.look, human: r.human, x: 0, y: 0 });
+      c.horse = r.horse ?? 0;
+      c.spinsLeft = HYPE.personalSpins;
       this.chars.push(c);
       this.byId.set(c.id, c);
     }
@@ -84,7 +98,13 @@ export class OnlineModel implements GameModel {
       grid: this.grid,
       ai: BALANCE.ai.normal,
       matchTime: 0,
-      canMove: (c) => this.state === 'play' && (c.team !== 'chaser' || this.matchTime >= BALANCE.match.chaserReleaseDelay),
+      mode: this.mode,
+      canMove: (c) => this.state === 'play' && canMoveFor(this.mode, c.team, this.matchTime, this.ms.ph),
+      ability: (c, slot) => abilityFor(this.mode, c, slot),
+      speedMul: (c) => speedMulFor(this.mode, c) * (this.ms.fx === 'turbo' ? HYPE.turboSpeed : 1),
+      useItem: () => undefined,
+      disguise: () => undefined,
+      downed: () => undefined,
       inSmoke: (x, y) => this.smokes.some((s) => (x - s.x) ** 2 + ((y - s.y) * 1.2) ** 2 < s.radius * s.radius),
       wind: { x: 0, y: 0 },
       emit: (e) => this.localEvents.push(e),
@@ -105,15 +125,20 @@ export class OnlineModel implements GameModel {
     return this.me;
   }
 
+  modeNet(): ModeNet {
+    return this.ms;
+  }
+
   // ------------------------------------------------------------------ red
 
   private onMsg(msg: ServerMsg): void {
     if (msg.t === 's') this.onSnapshot(msg.s, msg.m);
     else if (msg.t === 'start') net.takePendingStart(); // reconexión: seguimos en esta misma partida
-    else if (msg.t === 'results') this.results = { winner: msg.winner, timePlayed: msg.timePlayed, duration: msg.duration, entries: msg.entries };
+    else if (msg.t === 'results')
+      this.results = { mode: msg.mode, winner: msg.winner, champion: msg.champion, horse: msg.horse, timePlayed: msg.timePlayed, duration: msg.duration, entries: msg.entries };
   }
 
-  private onSnapshot(s: SnapshotNet, m?: { ac: number; dc: number; sc: number; st: number; ex: number; en: number; bt: number; el: number }): void {
+  private onSnapshot(s: SnapshotNet, m?: MeNet): void {
     net.hintServerTime(s.ts);
     const sample = s.ts - performance.now();
     if (!this.haveSnap) {
@@ -126,7 +151,10 @@ export class OnlineModel implements GameModel {
     }
     const c = new Map<number, number[]>();
     for (const e of s.c) c.set(e[0], e);
-    const snap: Snap = { ts: s.ts, st: STATES[s.st] ?? 'play', tl: s.tl / 10, mt: s.mt / 10, c, p: s.p, j: s.j, k: s.k, w: s.w ?? [0, 0] };
+    const snap: Snap = { ts: s.ts, st: STATES[s.st] ?? 'play', tl: s.tl / 10, mt: s.mt / 10, c, p: s.p, j: s.j, k: s.k, w: s.w ?? [0, 0], ms: s.ms ?? emptyModeNet() };
+    // Las barreras cambian el mapa ya (para que la predicción no las atraviese).
+    for (const e of s.e) if (e.t === 'barrier') this.grid.setBarrier(e.tiles, e.on);
+    this.ms = snap.ms;
     // el viento lo aplicamos ya a la predicción
     this.ctx.wind.x = snap.w[0] / 10;
     this.ctx.wind.y = snap.w[1] / 10;
@@ -139,9 +167,25 @@ export class OnlineModel implements GameModel {
     if (mine) this.reconcile(mine, s.ts, m);
   }
 
-  private reconcile(e: number[], ts: number, m?: { ac: number; dc: number; sc: number; st: number; ex: number; en: number; bt: number; el: number }): void {
+  /** Campos de los modos (equipo, disfraz, jamón bomba...). */
+  private applyModeFields(c: SimChar, e: number[]): void {
+    if (e[12] === undefined) return;
+    const team: Team = e[12] === 1 ? 'chaser' : 'escapist';
+    c.team = team;
+    c.disguise = e[13];
+    c.rot = e[14];
+    const f2 = e[15];
+    c.bomb = (f2 & F2.bomb) !== 0;
+    c.anchored = (f2 & F2.anchored) !== 0;
+    c.invisible = f2 & F2.invisible ? 0.2 : 0;
+    c.heldItem = f2 & F2.barrier ? 'barrier' : f2 & F2.grenade ? 'grenade' : null;
+    c.dashFree = f2 & F2.dashFree ? 0.2 : 0;
+  }
+
+  private reconcile(e: number[], ts: number, m?: MeNet): void {
     const me = this.me;
     const flags = e[9];
+    this.applyModeFields(me, e);
     const wasAlive = me.alive;
     me.alive = (flags & F.alive) !== 0;
     me.hp = e[7];
@@ -160,6 +204,7 @@ export class OnlineModel implements GameModel {
       me.exhaustTimer = m.ex;
       me.bootTime = m.bt;
       me.stats.eliminations = m.el;
+      if (m.sp !== undefined) me.spinsLeft = m.sp;
       if (Math.abs(me.straightTime - m.st) > 0.4) me.straightTime = m.st;
     }
 
@@ -228,7 +273,10 @@ export class OnlineModel implements GameModel {
       const { e } = this.pending.shift()!;
       // tu golpe y tu dash ya se mostraron al predecirlos
       if ((e.t === 'swing' || e.t === 'dash') && e.id === this.playerId) continue;
-      if (e.t === 'end') this.winner = e.winner;
+      if (e.t === 'end') {
+        this.winner = e.winner;
+        this.champion = e.ch ?? -1;
+      }
       out.push(e);
     }
     this.sendInput();
@@ -310,6 +358,7 @@ export class OnlineModel implements GameModel {
       c.human = (f & F.human) !== 0;
       c.trapped = (eb[10] ?? 0) / 10;
       c.rescueProg = (eb[11] ?? 0) / 100;
+      this.applyModeFields(c, eb);
       c.intent.mx = Math.sign(c.vx);
     }
     // primera colocación de tu personaje
@@ -336,13 +385,17 @@ export class OnlineModel implements GameModel {
     this.held = h;
   }
 
-  press(what: 'action' | 'special'): void {
+  press(what: 'action' | 'special' | 'rotate' | 'spin'): void {
     if (what === 'action') {
       this.aCount++;
       this.me.actionBuf = PRESS_BUFFER;
-    } else {
+    } else if (what === 'special') {
       this.bCount++;
       this.me.specialBuf = PRESS_BUFFER;
+    } else if (what === 'rotate') {
+      this.oCount++;
+    } else {
+      this.qCount++;
     }
     this.sendInput();
   }
@@ -357,13 +410,13 @@ export class OnlineModel implements GameModel {
     const y = Math.round(this.held.my * 100);
     const r = this.held.sprint ? 1 : 0;
     const L = this.lastSent;
-    const changed = x !== L.x || y !== L.y || r !== L.r || this.aCount !== L.a || this.bCount !== L.b;
+    const changed = x !== L.x || y !== L.y || r !== L.r || this.aCount !== L.a || this.bCount !== L.b || this.oCount !== L.o || this.qCount !== L.q;
     if (!changed) return;
     const now = performance.now();
     if (now - this.lastSendAt < INPUT_INTERVAL) return;
     this.lastSendAt = now;
-    this.lastSent = { x, y, r, a: this.aCount, b: this.bCount };
-    net.sendMsg({ t: 'in', x, y, r, a: this.aCount, b: this.bCount });
+    this.lastSent = { x, y, r, a: this.aCount, b: this.bCount, o: this.oCount, q: this.qCount };
+    net.sendMsg({ t: 'in', x, y, r, a: this.aCount, b: this.bCount, o: this.oCount, q: this.qCount });
   }
 
   destroy(): void {

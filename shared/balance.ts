@@ -14,7 +14,7 @@ export const BALANCE = {
   match: {
     /** Duración por defecto (segundos). Se puede cambiar en Opciones. */
     defaultDuration: 120,
-    durationOptions: [60, 90, 120, 180, 300],
+    durationOptions: [60, 90, 120, 150, 180, 300],
     defaultChasers: 3,
     defaultEscapists: 5,
     minChasers: 1,
@@ -183,8 +183,10 @@ export const NET = {
   escapistsPerChaser: 3,
   /** Opciones de relleno con bots que puede elegir el anfitrión (0 = sin bots). */
   botFillOptions: [0, 8, 12, 16, 20],
+  /** Cazadores al empezar (0 = automático). */
+  huntersOptions: [0, 1, 2, 3, 4, 5],
   /** Duraciones que puede elegir el anfitrión (s). */
-  durationOptions: [60, 90, 120, 180, 300],
+  durationOptions: [60, 90, 120, 150, 180, 300],
 } as const;
 
 /**
@@ -193,8 +195,8 @@ export const NET = {
  */
 export const MAP_SCALE: { maxPlayers: number; sx: number; sy: number }[] = [
   { maxPlayers: 9, sx: 1, sy: 1 },
-  { maxPlayers: 15, sx: 2, sy: 1 },
-  { maxPlayers: 20, sx: 2, sy: 2 },
+  // Hasta 20: el doble de ancho (con 2x2 quedaban demasiado dispersos y no había acción).
+  { maxPlayers: 20, sx: 2, sy: 1 },
 ];
 
 /** Frases de los bocadillos (y de la voz). Se envían por la red por su índice. */
@@ -223,11 +225,26 @@ export const PHRASES = {
     '¡Libre otra vez!', // 20 rojo
     '¡Que no me pillas, que no!', // 21 rojo
     '¡Jamón de oro, chavales!', // 22 rojo
+    '¡Cerebroooos... de jamón!', // 23 infectado
+    '¡Que no me toque, que no me toque!', // 24 superviviente
+    '¡Toma, pa ti, que quema!', // 25 bomba
+    '¡Quema, quema, quema!', // 26 bomba
+    '¿Esa papelera se ha movido?', // 27 buscador
+    'Soy una farola. Muy normal.', // 28 escondido
+    '¡Ruleta, ruleta!', // 29
+    '¡Vamos, Pata Negra!', // 30
+    '¡Soy una LEYENDA!', // 31
   ],
   /** Rueda de frases rápidas (tecla T): 8 por equipo. */
   wheel: {
     chaser: [0, 1, 2, 14, 15, 16, 17, 13],
     escapist: [5, 6, 18, 19, 21, 8, 10, 11],
+  },
+  /** Ruedas propias de cada modo (cazador / presa). */
+  modeWheel: {
+    infeccion: { chaser: [23, 0, 16, 1, 15, 11, 12, 13], escapist: [24, 9, 8, 19, 10, 31, 12, 11] },
+    bomba: { chaser: [25, 26, 11, 9, 12, 29, 30, 13], escapist: [21, 5, 11, 9, 12, 29, 30, 13] },
+    escondite: { chaser: [27, 0, 16, 1, 15, 12, 30, 13], escapist: [28, 11, 21, 5, 8, 29, 30, 13] },
   },
   /** Segundos mínimos entre dos frases del mismo personaje. */
   cooldown: 3,
@@ -279,3 +296,126 @@ export const CITY = {
   /** Ventana (s) para encadenar pilladas ("¡DOBLE PILLADA!"). */
   streakWindow: 7,
 } as const;
+
+/** Valores de cada modo de juego. */
+export const MODES = {
+  pilla: { duration: 120 },
+  infeccion: {
+    duration: 150,
+    /** Infectados al empezar (0 = automático: 1). */
+    startInfected: 1,
+    /** Los infectados son un 10% más rápidos. */
+    infectedSpeed: 1.1,
+    /** Distancia de contagio (px, además de los radios). */
+    touch: 3,
+    /** Barrera temporal: segundos y longitud en tiles. */
+    barrierSeconds: 5,
+    barrierLength: 3,
+    /** Cada cuánto ven los infectados al último superviviente en el minimapa (s). */
+    lastPing: 4,
+    itemWeights: { barrier: 3, boot: 3, grenade: 3 },
+  },
+  bomba: {
+    /** Mecha oculta: entre min y max segundos. */
+    fuseMin: 15,
+    fuseMax: 25,
+    /** Segundos sin poder devolverle el jamón al mismo. */
+    noReturn: 2,
+    /** El que lleva el jamón va un poco más rápido. */
+    holderSpeed: 1.12,
+    /** Con más de este número de vivos hay 2 jamones bomba. */
+    twoBombsOver: 10,
+    /** Pausa entre rondas (s). */
+    between: 3,
+    touch: 3,
+  },
+  escondite: {
+    duration: 180,
+    /** Fase de esconderse (los buscadores no ven ni se mueven). */
+    hideSeconds: 30,
+    /** Pistas sonoras de los escondidos: cada N s (en el último tramo, cada M s). */
+    hintEvery: 20,
+    hintEveryLate: 10,
+    lateFrom: 30,
+    /** Daño al escondido por golpe y vida que pierde el buscador al golpear un objeto normal. */
+    hitDamage: 50,
+    missPenalty: 8,
+    seekerHp: 100,
+    /** Velocidad moviéndose disfrazado. */
+    disguisedSpeed: 0.8,
+    /** Distancia para transformarse en un objeto (px). */
+    disguiseRange: 26,
+    /** Densidad de objetos: uno cada N tiles libres. */
+    propDensity: 11,
+  },
+} as const;
+
+/**
+ * DOPAMINA: monedas, combos, medallas, ruleta de la suerte y carrera de caballos.
+ * (Monedas del juego: no se compran con dinero real.)
+ */
+export const HYPE = {
+  /** Combo: si ganas monedas otra vez en este tiempo, sube el multiplicador. */
+  comboWindow: 4,
+  comboMax: 5,
+  coins: {
+    hit: 5,
+    trap: 25,
+    rescue: 30,
+    dodge: 10,
+    block: 10,
+    item: 5,
+    infect: 30,
+    surviveTick: 5,
+    lastSurvivor: 100,
+    pass: 10,
+    closeCall: 20,
+    roundSurvived: 15,
+    find: 20,
+    eliminate: 40,
+    hintSurvived: 5,
+    win: 60,
+    horse: 100,
+    jackpot: 200,
+    roulette: 50,
+  },
+  /** Ruleta de la suerte global: 2 tiradas por partida (fracción de la partida). */
+  globalSpinsAt: [0.2, 0.6],
+  /** En Jamón Bomba (sin tiempo fijo): segundos de partida. */
+  bombaSpinsAt: [20, 60],
+  spinDelay: 2.4,
+  effectSeconds: 15,
+  /** Tirada personal: 1 por partida, disponible tras estos segundos. */
+  personalSpins: 1,
+  personalFrom: 10,
+  /** Carrera de caballos: cuándo se corre (fracción de la partida) y duración. */
+  raceAt: 0.5,
+  bombaRaceAt: 40,
+  raceSeconds: 8,
+  horses: ['PATA NEGRA', 'BELLOTA EXPRESS', 'LONCHA LOCA', 'SERRANITO'],
+  /** Ruleta global: efectos para todos durante effectSeconds. */
+  globalWheel: ['turbo', 'lluvia', 'cabezones', 'cambiazo', 'escudos', 'doble'],
+  /** Ruleta personal (Q): premios y su probabilidad relativa. */
+  personalWheel: ['botas', 'escudo', 'monedas', 'dash', 'invisible', 'jackpot'],
+  personalWeights: [3, 3, 3, 2, 2, 0.7],
+  turboSpeed: 1.3,
+  /** Monedas que caen con la lluvia de monedas y cuánto vale cada una. */
+  rainCoins: 14,
+  coinValue: 10,
+  medalBonus: 25,
+  /** Cada cuántos segundos dan monedas por seguir vivo. */
+  surviveEvery: 10,
+} as const;
+
+/** Nivel según la experiencia acumulada (perfil local). */
+export function levelFor(xp: number): { level: number; cur: number; next: number } {
+  let level = 1;
+  let need = 200;
+  let base = 0;
+  while (xp >= base + need) {
+    base += need;
+    level++;
+    need = Math.round(need * 1.25);
+  }
+  return { level, cur: xp - base, next: need };
+}

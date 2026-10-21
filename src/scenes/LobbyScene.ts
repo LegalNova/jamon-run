@@ -1,8 +1,10 @@
 import Phaser from 'phaser';
 import { VIEW_H, VIEW_W } from '../config/balance';
-import { NET } from '../../shared/balance';
+import { HYPE, NET } from '../../shared/balance';
 import { LOOK_COLORS } from '../../shared/look';
 import { MAPS } from '../../shared/maps';
+import { MODE_LIST, modeInfo } from '../../shared/modes/rules';
+import type { ModeId } from '../../shared/sim/types';
 import type { ServerMsg } from '../../shared/protocol';
 import { audio } from '../core/audio';
 import { input } from '../core/input';
@@ -15,6 +17,8 @@ import { Button, Menu, OptionRow, panel, text, UI } from '../ui/widgets';
 import { addFullscreenButton, Backdrop, fadeIn, fadeTo } from './common';
 
 const DIFFS = ['easy', 'normal', 'hard'] as const;
+const MODE_IDS = MODE_LIST.map((m) => m.id);
+const SHORT: Record<ModeId, string> = { pilla: 'PILLA', infeccion: 'INFECCIÓN', bomba: 'BOMBA', escondite: 'ESCONDITE' };
 const DIFF_NAMES = { easy: 'FÁCIL', normal: 'NORMAL', hard: 'DIFÍCIL' };
 
 function fmt(s: number): string {
@@ -30,6 +34,8 @@ export class LobbyScene extends Phaser.Scene {
   private status!: Phaser.GameObjects.BitmapText;
   private countText!: Phaser.GameObjects.BitmapText;
   private rows: OptionRow[] = [];
+  private hostRows: OptionRow[] = [];
+  private votesText!: Phaser.GameObjects.BitmapText;
   private readyBtn!: Button;
   private startBtn!: Button;
   private unsub: (() => void) | null = null;
@@ -55,6 +61,7 @@ export class LobbyScene extends Phaser.Scene {
     text(this, 10, 16, 'SALA', { origin: [0, 0.5], color: UI.muted });
     this.codeText = text(this, 40, 16, net.code || '-----', { origin: [0, 0.5], scale: 2, color: UI.focusLight });
     this.countText = text(this, 302, 16, '', { origin: [1, 0.5], color: UI.text });
+    this.votesText = text(this, 312, 16, '', { origin: [0, 0.5], color: 0xfee761 });
     this.list = this.add.container(0, 0);
 
     this.menu = new Menu();
@@ -71,19 +78,30 @@ export class LobbyScene extends Phaser.Scene {
     const cycle = <T,>(arr: readonly T[], v: T | undefined, d: number) => arr[(arr.indexOf(v as T) + d + arr.length) % arr.length];
     const x = 393;
     const W = 156;
-    const defs: [string, () => string, (d: number) => void][] = [
-      ['MAPA', () => MAPS.find((m) => m.id === cur()?.mapId)?.name ?? '', (d) => set({ mapId: cycle(MAPS.map((m) => m.id), cur()?.mapId, d) })],
-      ['DURACIÓN', () => fmt(cur()?.duration ?? 120), (d) => set({ duration: cycle(NET.durationOptions, cur()?.duration as never, d) })],
-      ['BOTS', () => (cur()?.botFill ? `HASTA ${cur()!.botFill}` : 'NO'), (d) => set({ botFill: cycle(NET.botFillOptions, cur()?.botFill as never, d) })],
-      ['DIFICULTAD', () => DIFF_NAMES[cur()?.difficulty ?? 'normal'], (d) => set({ difficulty: cycle(DIFFS, cur()?.difficulty, d) })],
-      ['PÚBLICA', () => (cur()?.isPublic ? 'SÍ' : 'NO'), () => set({ isPublic: !cur()?.isPublic })],
+    const me = () => net.lobby?.players.find((p) => p.id === net.you);
+    const modes: (ModeId | 'voto')[] = ['voto', ...MODE_IDS];
+    const defs: [string, () => string, (d: number) => void, boolean][] = [
+      ['MODO', () => (cur()?.mode === 'voto' || !cur() ? 'VOTACIÓN' : SHORT[cur()!.mode as ModeId]), (d) => set({ mode: cycle(modes, cur()?.mode, d) }), true],
+      ['TU VOTO', () => (me()?.vote ? SHORT[me()!.vote!] : '-'), (d) => net.sendMsg({ t: 'vote', m: cycle(MODE_IDS, me()?.vote ?? undefined, d) }), false],
+      ['CABALLO', () => (me() && me()!.horse >= 0 ? HYPE.horses[me()!.horse].split(' ')[0] : 'AL AZAR'), (d) => net.sendMsg({ t: 'horse', h: ((me()?.horse ?? -1) + d + HYPE.horses.length) % HYPE.horses.length }), false],
+      ['MAPA', () => MAPS.find((m) => m.id === cur()?.mapId)?.name ?? '', (d) => set({ mapId: cycle(MAPS.map((m) => m.id), cur()?.mapId, d) }), true],
+      ['CAZADORES', () => (cur()?.hunters ? String(cur()!.hunters) : 'AUTO'), (d) => set({ hunters: cycle(NET.huntersOptions, cur()?.hunters as never, d) }), true],
+      ['DURACIÓN', () => fmt(cur()?.duration ?? 120), (d) => set({ duration: cycle(NET.durationOptions, cur()?.duration as never, d) }), true],
+      ['BOTS', () => (cur()?.botFill ? `HASTA ${cur()!.botFill}` : 'NO'), (d) => set({ botFill: cycle(NET.botFillOptions, cur()?.botFill as never, d) }), true],
+      ['DIFICULTAD', () => DIFF_NAMES[cur()?.difficulty ?? 'normal'], (d) => set({ difficulty: cycle(DIFFS, cur()?.difficulty, d) }), true],
+      ['PÚBLICA', () => (cur()?.isPublic ? 'SÍ' : 'NO'), () => set({ isPublic: !cur()?.isPublic }), true],
     ];
-    this.rows = defs.map(([label, get, change], i) => this.menu.add(new OptionRow(this, x, 46 + i * 17, label, get, change, W, undefined, 66)));
-    this.readyBtn = this.menu.add(new Button(this, x, 140, '¡ESTOY LISTO!', () => this.toggleReady(), 150, 17, UI.green));
-    this.startBtn = this.menu.add(new Button(this, x, 162, 'EMPEZAR PARTIDA', () => net.sendMsg({ t: 'start' }), 150, 17, UI.green));
-    this.menu.add(new Button(this, x, 184, 'COPIAR ENLACE', () => this.copyLink(), 150, 17));
-    this.menu.add(new Button(this, x, 206, 'MI PERSONAJE', () => this.editLook(), 150, 17));
-    this.menu.add(new Button(this, x, 228, 'SALIR DE LA SALA', () => this.leave(), 150, 17));
+    this.hostRows = [];
+    this.rows = defs.map(([label, get, change, hostOnly], i) => {
+      const r = this.menu.add(new OptionRow(this, x, 43 + i * 16, label, get, change, W, undefined, 66));
+      if (hostOnly) this.hostRows.push(r);
+      return r;
+    });
+    this.readyBtn = this.menu.add(new Button(this, x, 189, '¡ESTOY LISTO!', () => this.toggleReady(), 150, 14, UI.green));
+    this.startBtn = this.menu.add(new Button(this, x, 205, 'EMPEZAR PARTIDA', () => net.sendMsg({ t: 'start' }), 150, 14, UI.green));
+    this.menu.add(new Button(this, x, 221, 'COPIAR ENLACE', () => this.copyLink(), 150, 14));
+    this.menu.add(new Button(this, x - 38, 238, 'PERSONAJE', () => this.editLook(), 74, 14));
+    this.menu.add(new Button(this, x + 38, 238, 'SALIR', () => this.leave(), 74, 14));
     this.status = text(this, VIEW_W / 2, VIEW_H - 10, '', { color: UI.focus });
 
     this.unsub = net.on((m) => this.onMsg(m));
@@ -149,7 +167,14 @@ export class LobbyScene extends Phaser.Scene {
     const me = lobby.players.find((p) => p.id === lobby.you);
     const isHost = !!me?.host;
     this.countText.setText(fontText(`${lobby.players.filter((p) => p.connected).length}/${NET.maxPlayers} JUGADORES`));
-    this.rows.forEach((r) => (r.enabled = isHost));
+    this.hostRows.forEach((r) => (r.enabled = isHost));
+    // Recuento de votos de modo.
+    const votes = new Map<ModeId, number>();
+    for (const p of lobby.players) if (p.connected && p.vote) votes.set(p.vote, (votes.get(p.vote) ?? 0) + 1);
+    const mode = lobby.settings.mode;
+    this.votesText.setText(
+      fontText(mode === 'voto' ? `VOTOS: ${MODE_IDS.map((m) => `${SHORT[m][0]}${votes.get(m) ?? 0}`).join(' ')}` : `MODO: ${modeInfo(mode).name}`),
+    );
     this.readyBtn.setText(me?.ready ? 'YA NO ESTOY LISTO' : '¡ESTOY LISTO!');
     const others = lobby.players.filter((p) => p.connected && p.id !== lobby.you);
     const allReady = others.every((p) => p.ready);

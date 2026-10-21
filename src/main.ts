@@ -12,6 +12,9 @@ import { ControlsScene } from './scenes/ControlsScene';
 import { CreditsScene } from './scenes/CreditsScene';
 import { GameScene } from './scenes/GameScene';
 import { MapSelectScene } from './scenes/MapSelectScene';
+import { ModeSelectScene } from './scenes/ModeSelectScene';
+import { TutorialScene } from './scenes/TutorialScene';
+import { RecordsScene } from './scenes/RecordsScene';
 import { MenuScene } from './scenes/MenuScene';
 import { OptionsScene } from './scenes/OptionsScene';
 import { PauseScene } from './scenes/PauseScene';
@@ -45,6 +48,9 @@ const game = new Phaser.Game({
     BootScene,
     TitleScene,
     MenuScene,
+    ModeSelectScene,
+    TutorialScene,
+    RecordsScene,
     MapSelectScene,
     RoleRevealScene,
     GameScene,

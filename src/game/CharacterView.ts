@@ -3,12 +3,29 @@ import { PHRASES, RESCUE } from '../../shared/balance';
 import { LOOK_COLORS } from '../../shared/look';
 import { SimChar, SWING_TIME } from '../../shared/sim/Char';
 import { Grid, Terrain } from '../../shared/grid';
-import { CHAR_H, ensureCharTexture } from '../gfx/characters';
+import { CHAR_H, ensureCharTexture, Outfit } from '../gfx/characters';
 import { FONT, FONT_PLAIN, fontText } from '../gfx/font';
 import type { Fx } from '../gfx/fx';
 import { hexToInt, PAL, TEAM_COLORS } from '../gfx/palette';
 
 type Facing = 'down' | 'up' | 'side';
+
+/** Cómo se dibuja cada personaje según el modo (atuendo, jamón en la mano...). */
+export interface CharStyle {
+  outfit(c: SimChar): Outfit;
+  hasHam(c: SimChar): boolean;
+  indicator(c: SimChar): string;
+}
+
+/** Lo que la vista necesita saber del momento (quién mira, efectos activos...). */
+export interface ViewCtx {
+  viewer: SimChar;
+  /** Urgencia del jamón bomba que lleva (0..2) o -1. */
+  urgency: number;
+  bigHeads: boolean;
+  /** ¿El que mira es "enemigo" de este personaje? (para ocultar disfraces e invisibles). */
+  enemy: boolean;
+}
 
 /** Parte visual de un personaje. Solo lee el estado (SimChar) y reacciona a eventos. */
 export class CharacterView {
@@ -35,21 +52,30 @@ export class CharacterView {
   private ghostLift = 0;
   private cage: Phaser.GameObjects.Image;
   private trapG: Phaser.GameObjects.Graphics;
+  private outfit: Outfit;
+  private team: string;
+  private prop: Phaser.GameObjects.Image | null = null;
+  private bombImg: Phaser.GameObjects.Image | null = null;
+  private head: Phaser.GameObjects.Sprite | null = null;
+  private sparkT = 0;
 
   constructor(
     private scene: Phaser.Scene,
     c: SimChar,
     readonly isPlayer: boolean,
     showName: boolean,
+    private style: CharStyle,
   ) {
-    this.key = ensureCharTexture(scene, c.team, c.look);
+    this.outfit = style.outfit(c);
+    this.team = c.team;
+    this.key = ensureCharTexture(scene, c.team, c.look, this.outfit);
     this.shadow = scene.add.image(c.x, c.y, 'shadow').setAlpha(0.28).setDepth(-600);
     this.sprite = scene.add.sprite(c.x, c.y, this.key, 'down_idle0').setOrigin(0.5, (CHAR_H - 1) / CHAR_H);
     this.indicator = scene.add
-      .image(c.x, c.y, isPlayer ? 'ind_player' : c.isChaser ? 'ind_chaser' : 'ind_escapist')
+      .image(c.x, c.y, isPlayer ? 'ind_player' : style.indicator(c))
       .setOrigin(0.5, 1)
       .setDepth(9000);
-    if (c.isChaser) this.ham = scene.add.image(c.x, c.y, 'ham').setOrigin(2 / 15, 4.5 / 9);
+    if (style.hasHam(c)) this.ham = scene.add.image(c.x, c.y, 'ham').setOrigin(2 / 15, 4.5 / 9);
     this.shieldRing = scene.add.image(c.x, c.y, 'p_ring').setTint(0x7cc8ff).setVisible(false).setScale(1.25);
     this.hpBar = scene.add.graphics().setDepth(8990);
     this.cage = scene.add.image(c.x, c.y, 'cage').setOrigin(0.5, 1).setVisible(false);
@@ -75,8 +101,27 @@ export class CharacterView {
     this.flashT = 0.09;
   }
 
+  /** Cambio de equipo (te han infectado): nuevo atuendo, nuevo indicador. */
+  private restyle(c: SimChar): void {
+    this.outfit = this.style.outfit(c);
+    this.team = c.team;
+    this.key = ensureCharTexture(this.scene, c.team, c.look, this.outfit);
+    this.animKey = '';
+    if (!this.isPlayer) this.indicator.setTexture(this.style.indicator(c));
+    const ham = this.style.hasHam(c);
+    if (ham && !this.ham) this.ham = this.scene.add.image(c.x, c.y, 'ham').setOrigin(2 / 15, 4.5 / 9);
+    if (!ham && this.ham) {
+      this.ham.destroy();
+      this.ham = null;
+    }
+  }
+
   onKo(): void {
     this.ghost = true;
+    this.prop?.setVisible(false);
+    this.bombImg?.setVisible(false);
+    this.head?.setVisible(false);
+    this.sprite.setVisible(true);
     this.ghostLift = 0;
     this.sprite.clearTint();
     this.tinted = false;
@@ -113,13 +158,16 @@ export class CharacterView {
 
   // ------------------------------------------------------------------ dibujo
 
-  update(dt: number, c: SimChar, hidden: boolean, grid: Grid, fx: Fx): void {
+  update(dt: number, c: SimChar, hidden: boolean, grid: Grid, fx: Fx, vc: ViewCtx): void {
     this.clock += dt;
     this.swingT -= dt;
     this.hurtT -= dt;
     this.flashT -= dt;
     const footY = c.y + 3;
-    this.updateBubble(dt, c, hidden);
+    if (c.team !== this.team && c.alive) this.restyle(c);
+    // Invisible (premio de la ruleta): los enemigos casi no le ven.
+    if (c.invisible > 0 && vc.enemy) hidden = true;
+    this.updateBubble(dt, c, hidden || (c.disguise >= 0 && vc.enemy));
 
     if (!c.alive) {
       if (!this.ghost) this.onKo();
@@ -174,10 +222,47 @@ export class CharacterView {
       return;
     }
 
+    const speed = Math.hypot(c.vx, c.vy);
+
+    // Escondite: disfrazado de objeto. Igual que uno de verdad si está quieto.
+    if (c.disguise >= 0) {
+      const key = `prop_${c.disguise}_${c.rot}`;
+      if (!this.prop) this.prop = this.scene.add.image(c.x, footY, key).setOrigin(0.5, 19 / 20);
+      if (this.prop.texture.key !== key) {
+        this.prop.setTexture(key);
+        fx.smokePuff(c.x, c.y - 4, 3);
+      }
+      const moving = speed > 5 && !c.anchored;
+      const shake = moving ? Math.round(Math.sin(this.clock * 40)) : 0;
+      this.prop.setPosition(c.x + shake, footY).setDepth(c.y).setVisible(true).setAlpha(this.isPlayer ? 0.9 : 1);
+      this.sprite.setVisible(false);
+      this.shadow.setPosition(c.x, footY);
+      this.ham?.setVisible(false);
+      this.head?.setVisible(false);
+      this.bombImg?.setVisible(false);
+      this.shieldRing.setVisible(false);
+      this.hpBar.clear();
+      this.lastHpDrawn = -3;
+      const bob = Math.round(Math.sin(this.clock * 5) * 1.2);
+      // Solo tú (y tus compañeros) sabéis quién es.
+      this.indicator.setPosition(c.x, footY - 25 + bob).setVisible(!vc.enemy);
+      this.nameTag?.setPosition(Math.round(c.x), Math.round(footY - 29 + bob)).setVisible(!vc.enemy);
+      this.dustTimer -= dt;
+      if (moving && this.dustTimer <= 0) {
+        fx.dustAt(c.x, c.y + 3, 1);
+        this.dustTimer = 0.12;
+      }
+      return;
+    }
+    if (this.prop?.visible) {
+      this.prop.setVisible(false);
+      fx.smokePuff(c.x, c.y - 4, 4);
+    }
+    this.sprite.setVisible(true);
+
     const ax = Math.abs(c.fx);
     const ay = Math.abs(c.fy);
     const dir: Facing = ax > ay * 0.9 ? 'side' : c.fy < 0 ? 'up' : 'down';
-    const speed = Math.hypot(c.vx, c.vy);
 
     let state = 'idle';
     if (this.hurtT > 0) state = 'hurt';
@@ -209,12 +294,45 @@ export class CharacterView {
     if (c.invuln > 0 && this.hurtT < 0.1 && Math.floor(this.clock * 18) % 2 === 0) alpha = 0.45;
     if (c.dashTime > 0) alpha = 0.7;
     if (c.inBush) alpha = Math.min(alpha, hidden ? 0.18 : 0.75);
+    if (c.invisible > 0) alpha = Math.min(alpha, vc.enemy ? 0.08 : 0.4);
     this.sprite.setAlpha(alpha);
 
+    // Cabezones (ruleta): una copia de la cabeza, más grande.
+    if (vc.bigHeads) {
+      if (!this.head) this.head = this.scene.add.sprite(c.x, footY, this.key, 'down_idle0').setOrigin(0.5, 12 / CHAR_H).setCrop(0, 0, 16, 12).setScale(1.8);
+      const fr = this.sprite.frame.name;
+      if (this.head.texture.key !== this.key || this.head.frame.name !== fr) this.head.setTexture(this.key, fr);
+      this.head
+        .setPosition(c.x, footY - 7)
+        .setFlipX(this.sprite.flipX)
+        .setDepth(c.y + 0.6)
+        .setAlpha(alpha)
+        .setVisible(true);
+    } else this.head?.setVisible(false);
+
+    // Jamón bomba sobre la cabeza, con chispas que se aceleran.
+    if (c.bomb) {
+      if (!this.bombImg) this.bombImg = this.scene.add.image(c.x, footY, 'bomb_ham').setOrigin(0.5, 1);
+      const u = Math.max(0, vc.urgency);
+      const pulse = 1 + Math.sin(this.clock * (8 + u * 10)) * (0.06 + u * 0.06);
+      this.bombImg
+        .setPosition(c.x, footY - (vc.bigHeads ? 32 : 22) + Math.round(Math.sin(this.clock * 7) * 1.5))
+        .setScale(pulse)
+        .setDepth(9002)
+        .setVisible(!hidden)
+        .setTint(u === 2 && Math.floor(this.clock * 12) % 2 === 0 ? 0xff8080 : 0xffffff);
+      this.sparkT -= dt;
+      if (this.sparkT <= 0 && !hidden) {
+        this.sparkT = u === 2 ? 0.04 : u === 1 ? 0.09 : 0.16;
+        fx.spark(c.x + 7, footY - (vc.bigHeads ? 44 : 34));
+      }
+    } else this.bombImg?.setVisible(false);
+
     const bob = Math.round(Math.sin(this.clock * 5) * 1.2);
-    this.indicator.setPosition(c.x, footY - 25 + bob);
-    this.indicator.setVisible(!hidden);
-    this.nameTag?.setPosition(Math.round(c.x), Math.round(footY - 29 + bob)).setVisible(!hidden).setAlpha(1);
+    const lift = vc.bigHeads ? 10 : 0;
+    this.indicator.setPosition(c.x, footY - 25 - lift + bob);
+    this.indicator.setVisible(!hidden && !c.bomb);
+    this.nameTag?.setPosition(Math.round(c.x), Math.round(footY - 29 - lift + bob)).setVisible(!hidden).setAlpha(1);
 
     // jamón en la mano
     if (this.ham) {
@@ -249,8 +367,8 @@ export class CharacterView {
       this.shieldRing.setAlpha(0.55 + Math.sin(this.clock * 6) * 0.25);
     }
 
-    // barra de vida pequeña (solo el equipo rojo tiene vida)
-    if (!c.isChaser) {
+    // barra de vida pequeña (la tiene quien puede recibir daño)
+    if (c.maxHp < 900 && this.style.indicator(c) !== 'ind_infected') {
       const show = c.hp < c.maxHp && !hidden;
       const key = show ? c.hp : -2;
       if (key !== this.lastHpDrawn) {
@@ -310,5 +428,8 @@ export class CharacterView {
     this.bubble?.destroy();
     this.cage.destroy();
     this.trapG.destroy();
+    this.prop?.destroy();
+    this.bombImg?.destroy();
+    this.head?.destroy();
   }
 }

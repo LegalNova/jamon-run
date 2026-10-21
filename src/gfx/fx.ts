@@ -19,8 +19,52 @@ export class Fx {
   private smoke: Phaser.GameObjects.Particles.ParticleEmitter;
   private debris: Phaser.GameObjects.Particles.ParticleEmitter;
   private trail: Phaser.GameObjects.Particles.ParticleEmitter;
+  private confettiE: Phaser.GameObjects.Particles.ParticleEmitter;
+  private slices: Phaser.GameObjects.Particles.ParticleEmitter;
+  private virus: Phaser.GameObjects.Particles.ParticleEmitter;
+  private fuse: Phaser.GameObjects.Particles.ParticleEmitter;
 
   constructor(private scene: Phaser.Scene, biome: BiomeId) {
+    this.confettiE = scene.add
+      .particles(0, 0, 'p_confetti', {
+        lifespan: { min: 900, max: 1600 },
+        speed: { min: 60, max: 190 },
+        angle: { min: 200, max: 340 },
+        gravityY: 180,
+        rotate: { min: 0, max: 360 },
+        scale: { min: 0.8, max: 1.4 },
+        tint: [0xe43b44, 0xfee761, 0x63c74d, 0x2f88e8, 0xff7ab8, 0xffffff],
+        emitting: false,
+      })
+      .setDepth(9400);
+    this.slices = scene.add
+      .particles(0, 0, 'p_slice', {
+        lifespan: { min: 700, max: 1200 },
+        speed: { min: 50, max: 160 },
+        gravityY: 240,
+        rotate: { min: 0, max: 360 },
+        emitting: false,
+      })
+      .setDepth(9401);
+    this.virus = scene.add
+      .particles(0, 0, 'p_virus', {
+        lifespan: { min: 400, max: 900 },
+        speed: { min: 10, max: 60 },
+        scale: { start: 1.2, end: 0 },
+        alpha: { start: 1, end: 0 },
+        emitting: false,
+      })
+      .setDepth(8002);
+    this.fuse = scene.add
+      .particles(0, 0, 'p_px', {
+        lifespan: { min: 150, max: 320 },
+        speed: { min: 20, max: 60 },
+        angle: { min: 200, max: 340 },
+        scale: { start: 1, end: 0 },
+        tint: [0xfee761, 0xfeae34, 0xffffff],
+        emitting: false,
+      })
+      .setDepth(9003);
     this.dust = scene.add
       .particles(0, 0, 'p_dust', {
         lifespan: { min: 280, max: 480 },
@@ -143,6 +187,35 @@ export class Fx {
       ease: 'Quad.easeOut',
       onComplete: () => r.destroy(),
     });
+  }
+
+  /** Chispa de la mecha del jamón bomba. */
+  spark(x: number, y: number): void {
+    this.fuse.emitParticleAt(x, y, 2);
+  }
+
+  confetti(x: number, y: number, n = 30): void {
+    this.confettiE.emitParticleAt(x, y, n);
+  }
+
+  /** ¡BUM! Confeti, lonchas de jamón y humo. */
+  explosion(x: number, y: number): void {
+    this.confettiE.emitParticleAt(x, y, 40);
+    this.slices.emitParticleAt(x, y, 14);
+    this.smoke.emitParticleAt(x, y, 14);
+    this.sparks.updateConfig({ angle: { min: 0, max: 360 } });
+    for (const c of [0xffffff, 0xfee761, 0xfeae34, 0xe43b44]) {
+      this.sparks.setParticleTint(c);
+      this.sparks.emitParticleAt(x, y, 10);
+    }
+    this.ring(x, y, 0xfeae34, 60);
+    this.ring(x, y, 0xffffff, 36);
+  }
+
+  /** Contagio: estallido de partículas verdes. */
+  infect(x: number, y: number, n = 16): void {
+    this.virus.emitParticleAt(x, y, n);
+    if (n > 4) this.ring(x, y, 0x9cff5a, 30);
   }
 
   float(x: number, y: number, text: string, color: number, big = false): void {

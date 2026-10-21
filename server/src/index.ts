@@ -17,6 +17,7 @@ const json = (data: unknown, status = 200) =>
  * Worker de JAMÓN RUN:
  *  - /api/quick  → código de una sala pública con sitio (partida rápida)
  *  - /api/new    → código nuevo para una sala privada
+ *  - /api/rank   → ranking mundial por modo
  *  - /ws/CODIGO  → WebSocket con la sala (un Durable Object por código)
  *  - el resto    → el juego (archivos estáticos de dist/)
  */
@@ -28,6 +29,7 @@ export default {
     if (url.pathname === '/api/quick') return json({ code: await mm().quick() });
     if (url.pathname === '/api/new') return json({ code: await mm().newCode() });
     if (url.pathname === '/api/stats') return json(await mm().stats());
+    if (url.pathname === '/api/rank') return json(await mm().rank());
 
     const m = /^\/ws\/([A-Za-z]{5})$/.exec(url.pathname);
     if (m) {

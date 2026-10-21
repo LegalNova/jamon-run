@@ -4,6 +4,10 @@ import type { RoomPhase } from '../../shared/protocol';
 import { randomCode } from '../../shared/protocol';
 import type { Env } from './index';
 
+/** Ranking mundial: las mejores partidas online de cada modo (monedas). */
+export type RankBoard = Record<string, { name: string; coins: number; at: number }[]>;
+const RANK_SIZE = 10;
+
 interface RoomInfo {
   code: string;
   players: number;
@@ -44,6 +48,23 @@ export class Matchmaker extends DurableObject<Env> {
     let code = randomCode(NET.roomCodeLength);
     while (this.rooms.has(code)) code = randomCode(NET.roomCodeLength);
     return code;
+  }
+
+  /** Apunta las monedas de las personas de una partida y deja las 10 mejores de cada modo. */
+  async record(mode: string, entries: { name: string; coins: number }[]): Promise<void> {
+    const board = ((await this.ctx.storage.get<RankBoard>('rank')) ?? {}) as RankBoard;
+    const list = board[mode] ?? [];
+    for (const e of entries) {
+      if (!e.name || !(e.coins > 0)) continue;
+      list.push({ name: String(e.name).slice(0, 12), coins: Math.floor(e.coins), at: Date.now() });
+    }
+    list.sort((a, b) => b.coins - a.coins);
+    board[mode] = list.slice(0, RANK_SIZE);
+    await this.ctx.storage.put('rank', board);
+  }
+
+  async rank(): Promise<RankBoard> {
+    return ((await this.ctx.storage.get<RankBoard>('rank')) ?? {}) as RankBoard;
   }
 
   stats(): { rooms: number; players: number } {

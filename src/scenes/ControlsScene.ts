@@ -87,7 +87,7 @@ export class ControlsScene extends Phaser.Scene {
     this.menu.add(new Button(this, VIEW_W / 2 + 52, by, 'VOLVER', () => this.back(), 96, 15));
     this.msg = text(this, VIEW_W / 2, by + 18, '', { color: UI.green });
     text(this, VIEW_W / 2, VIEW_H - 24, 'LAS FLECHAS SIEMPRE MUEVEN · SHIFT DERECHO TAMBIÉN ES SPRINT', { color: UI.muted });
-    text(this, VIEW_W / 2, VIEW_H - 12, 'MANDO: STICK · A GOLPE/DASH · X HABILIDAD · RB SPRINT · SELECT FRASES · START PAUSA', { color: UI.muted });
+    text(this, VIEW_W / 2, VIEW_H - 12, 'MANDO: A GOLPE · X HABILIDAD · Y GIRAR · LT RULETA · RB SPRINT · SELECT FRASES', { color: UI.muted });
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => input.cancelCapture());
   }
 

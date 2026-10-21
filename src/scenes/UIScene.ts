@@ -1,13 +1,16 @@
 import Phaser from 'phaser';
-import { BALANCE, PHRASES, TILE } from '../config/balance';
+import { BALANCE, HYPE, MODES, PHRASES, TILE } from '../config/balance';
 import { keyName, settings } from '../config/settings';
 import { audio } from '../core/audio';
 import { input } from '../core/input';
+import { abilityFor, modeInfo } from '../../shared/modes/rules';
 import type { SimChar } from '../../shared/sim/Char';
+import type { Ability, ModeId } from '../../shared/sim/types';
 import { PICKUP_COLORS } from '../game/views';
 import { FONT, fontText } from '../gfx/font';
 import { Team } from '../gfx/characters';
 import { TEAM_COLORS } from '../gfx/palette';
+import { GLOBAL_LABELS, HypeOverlay } from '../ui/hype';
 import { panel, text, UI } from '../ui/widgets';
 import { viewSize } from './common';
 import type { GameScene } from './GameScene';
@@ -16,6 +19,19 @@ interface FeedLine {
   t: Phaser.GameObjects.BitmapText;
   life: number;
 }
+
+/** Icono y nombre de cada habilidad en las casillas del HUD. */
+const ABILITY_UI: Record<Ability, { icon: string; label: string; rot?: number }> = {
+  attack: { icon: 'ham', label: 'GOLPE', rot: -1.2 },
+  throw: { icon: 'ham', label: 'LANZAR', rot: -0.8 },
+  dash: { icon: 'icon_dash', label: 'DASH' },
+  smoke: { icon: 'icon_smoke', label: 'HUMO' },
+  item: { icon: 'item_barrier', label: 'OBJETO' },
+  disguise: { icon: 'prop_0_0', label: 'DISFRAZ' },
+  none: { icon: 'icon_dash', label: '' },
+};
+
+const INFECTED_GREEN = 0x9cff5a;
 
 export class UIScene extends Phaser.Scene {
   private game_!: GameScene;
@@ -49,6 +65,22 @@ export class UIScene extends Phaser.Scene {
   private wheelItems: Phaser.GameObjects.BitmapText[] = [];
   private wheelSel = 0;
   private pingText!: Phaser.GameObjects.BitmapText;
+  private roleText!: Phaser.GameObjects.BitmapText;
+  private slotLabels: Phaser.GameObjects.BitmapText[] = [];
+  private slotAbility: Ability[] = [];
+  private mode: ModeId = 'pilla';
+  private hype!: HypeOverlay;
+  private spinText!: Phaser.GameObjects.BitmapText;
+  private effectText!: Phaser.GameObjects.BitmapText;
+  private modeText!: Phaser.GameObjects.BitmapText;
+  private blind!: Phaser.GameObjects.Rectangle;
+  private blindText!: Phaser.GameObjects.BitmapText;
+  private dark: Phaser.GameObjects.RenderTexture | null = null;
+  private lightRound!: Phaser.GameObjects.Image;
+  private lightCone!: Phaser.GameObjects.Image;
+  private bombWarn!: Phaser.GameObjects.BitmapText;
+  private fuseT = 0;
+  private lastTempo = 1;
   /** La rueda de frases está abierta (el juego no lee acciones mientras tanto). */
   wheelOpen = false;
 
@@ -63,8 +95,13 @@ export class UIScene extends Phaser.Scene {
     this.feed = [];
     this.slotKeys = [];
     this.slotIcons = [];
+    this.slotLabels = [];
+    this.slotAbility = [];
     this.wheel = null;
     this.wheelOpen = false;
+    this.dark = null;
+    this.mode = this.game_.model.mode;
+    const info = modeInfo(this.mode);
     const chaser = this.team === 'chaser';
     const { Z, W, H } = viewSize(this);
     this.W = W;
@@ -78,43 +115,51 @@ export class UIScene extends Phaser.Scene {
     const VIEW_H = H;
     const TC = TEAM_COLORS[this.team];
 
+    // Noche (Infección y Escondite): oscuridad con luces y linternas.
+    if (info.night) {
+      this.dark = this.add.renderTexture(0, 0, W, H).setOrigin(0).setDepth(-50);
+      this.lightRound = this.make.image({ key: 'light_round', add: false });
+      this.lightCone = this.make.image({ key: 'light_cone', add: false }).setOrigin(0, 0.5);
+    }
     this.vignette = this.add.graphics();
     this.g = this.add.graphics();
     // panel superior izquierdo
     panel(this.g, 4, 4, 132, 38);
-    text(this, 9, 11, `${TC.role} ${TC.team}`, { origin: [0, 0.5], color: TC.light });
-    if (chaser) this.add.image(112, 11, 'icon_skull');
+    this.roleText = text(this, 9, 11, `${TC.role} ${TC.team}`, { origin: [0, 0.5], color: TC.light });
+    if (chaser && this.mode === 'pilla') this.add.image(112, 11, 'icon_skull');
     this.row2Label = text(this, 131, 11, '', { origin: [1, 0.5] });
-    if (chaser) text(this, 12, 22, '→', { color: 0xfee761 });
+    if (chaser && this.mode === 'pilla') text(this, 12, 22, '→', { color: 0xfee761 });
     else this.add.image(12, 22, 'icon_heart');
     this.hpText = text(this, 131, 22, '', { origin: [1, 0.5] });
     this.add.image(12, 33, 'icon_bolt');
+    this.hype = new HypeOverlay(this, W, H, 4, 45);
 
     // temporizador
     panel(this.g, VIEW_W / 2 - 34, 3, 68, 22);
     this.add.image(VIEW_W / 2 - 24, 14, 'icon_clock');
     this.timer = text(this, VIEW_W / 2 + 6, 14, '0:00', { scale: 2 });
     this.aliveText = text(this, VIEW_W / 2, 32, '', { color: TEAM_COLORS.escapist.light });
-    this.pingText = text(this, 6, VIEW_H - 54, '', { origin: [0, 0.5], color: UI.muted });
+    this.pingText = text(this, VIEW_W - 6, 8, '', { origin: [1, 0.5], color: UI.muted });
 
-    // casillas de habilidad
+    // casillas de habilidad (cambian según el modo y el papel)
     const b = settings.bindings;
-    const slots: [string, string][] = chaser
-      ? [['ham', keyName(b.action)], ['ham', keyName(b.special)], ['icon_bolt', keyName(b.sprint)]]
-      : [['icon_dash', keyName(b.action)], ['icon_smoke', keyName(b.special)], ['icon_bolt', keyName(b.sprint)]];
-    slots.forEach(([icon, key], i) => {
+    const keys = [b.action, b.special, b.sprint, b.rotate];
+    const nSlots = this.mode === 'escondite' ? 4 : 3;
+    for (let i = 0; i < nSlots; i++) {
       const x = 8 + i * 40;
       const y = VIEW_H - 40;
       panel(this.g, x, y, 28, 28, UI.panelDark);
-      const img = this.add.image(x + 14, y + 14, icon);
-      if (chaser && i === 1) img.setRotation(-0.8);
-      if (chaser && i === 0) img.setRotation(-1.2);
-      this.slotIcons.push(img);
-      this.slotKeys.push(text(this, x + 14, y + 33, key.replace(' IZQ', '').replace(' DER', ''), { color: UI.muted }));
-    });
-    text(this, 8 + 14, VIEW_H - 46, chaser ? 'GOLPE' : 'DASH', { color: UI.text });
-    text(this, 8 + 40 + 14, VIEW_H - 46, chaser ? 'LANZAR' : 'HUMO', { color: UI.text });
-    text(this, 8 + 80 + 14, VIEW_H - 46, 'SPRINT', { color: UI.text });
+      this.slotIcons.push(this.add.image(x + 14, y + 14, i === 2 ? 'icon_bolt' : 'icon_dash'));
+      this.slotKeys.push(text(this, x + 14, y + 33, keyName(keys[i]).replace(' IZQ', '').replace(' DER', ''), { color: UI.muted }));
+      this.slotLabels.push(text(this, x + 14, VIEW_H - 46, i === 2 ? 'SPRINT' : i === 3 ? 'GIRAR' : '', { color: UI.text }));
+      this.slotAbility.push('none');
+    }
+    if (nSlots === 4) this.slotIcons[3].setTexture('icon_dash').setRotation(Math.PI / 2);
+    this.refreshSlots();
+    this.spinText = text(this, 8, VIEW_H - 58, '', { origin: [0, 0.5], color: 0xffd23f });
+    this.effectText = text(this, VIEW_W / 2, 112, '', { color: 0xff7ab8 });
+    this.modeText = text(this, VIEW_W / 2, VIEW_H / 2 + 50, '', { color: 0xfee761 });
+    this.bombWarn = text(this, VIEW_W / 2, 62, '', { color: 0xff5a5a, scale: 2 });
 
     // estados
     this.shieldIcon = this.add.image(144, 12, 'item_shield').setVisible(false);
@@ -142,6 +187,9 @@ export class UIScene extends Phaser.Scene {
     this.trapHint = text(this, VIEW_W / 2, VIEW_H / 2 + 34, '', { color: 0xfee761 }).setVisible(false);
     text(this, VIEW_W / 2, VIEW_H - 24, `${keyName(settings.bindings.talk)}: FRASES`, { color: UI.muted }).setAlpha(0.7);
     this.flash = this.add.rectangle(0, 0, VIEW_W, VIEW_H, 0xe43b44, 0).setOrigin(0);
+    // Fase de esconderse: los buscadores no ven nada.
+    this.blind = this.add.rectangle(0, 0, VIEW_W, VIEW_H, 0x05040a, 1).setOrigin(0).setDepth(90).setVisible(false);
+    this.blindText = text(this, VIEW_W / 2, VIEW_H / 2, '', { scale: 2, color: 0xfee761 }).setDepth(91).setVisible(false);
 
     const ev = this.game_.events;
     const onCountdown = (n: number) => this.onCountdown(n);
@@ -154,19 +202,103 @@ export class UIScene extends Phaser.Scene {
         this.tweens.add({ targets: this.flash, fillAlpha: 0, duration: 260 });
       }
     };
-    ev.on('countdown', onCountdown);
-    ev.on('announce', onAnnounce);
-    ev.on('feed', onFeed);
-    ev.on('end', onEnd);
-    ev.on('hit', onHit);
+    const onFlash = (color: number, a: number) => {
+      this.flash.setFillStyle(color, a);
+      this.tweens.add({ targets: this.flash, fillAlpha: 0, duration: 400 });
+    };
+    const onCoin = (n: number, combo: number) => this.hype.addCoins(n, combo);
+    const onRoulette = (kind: 'global' | 'me', r: number, title: string) => this.hype.roulette(kind, r, title);
+    const onRace = (w: number) => this.hype.startRace(w, this.game_.player.horse);
+    const onRaceEnd = (w: number) => this.hype.endRace(w, this.game_.player.horse === w);
+    const onMedal = (m: string) => this.hype.medal(m);
+    const onBurst = (n: number) => this.hype.burst(this.W / 2, this.H / 2, n);
+    const handlers: [string, (...a: never[]) => void][] = [
+      ['countdown', onCountdown],
+      ['announce', onAnnounce],
+      ['feed', onFeed],
+      ['end', onEnd],
+      ['hit', onHit],
+      ['flash', onFlash],
+      ['coin', onCoin],
+      ['roulette', onRoulette],
+      ['race', onRace],
+      ['raceEnd', onRaceEnd],
+      ['medal', onMedal],
+      ['burst', onBurst],
+    ];
+    for (const [k, f] of handlers) ev.on(k, f);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
-      ev.off('countdown', onCountdown);
-      ev.off('announce', onAnnounce);
-      ev.off('feed', onFeed);
-      ev.off('end', onEnd);
-      ev.off('hit', onHit);
+      for (const [k, f] of handlers) ev.off(k, f);
     });
-    this.addFeed(chaser ? '¡A POR LOS ROJOS!' : '¡QUE NO TE PILLEN LOS AZULES!', TC.light);
+    this.addFeed(this.introLine(), TC.light);
+  }
+
+  private countdownLine(): string {
+    const hunter = this.game_.player.team === 'chaser';
+    switch (this.mode) {
+      case 'infeccion':
+        return hunter ? 'TIENES HAMBRE DE JAMÓN...' : '¡HAY UN INFECTADO ENTRE VOSOTROS!';
+      case 'bomba':
+        return '¡ALGUIEN VA A LLEVAR EL JAMÓN!';
+      case 'escondite':
+        return hunter ? 'CIERRA LOS OJOS Y CUENTA...' : '¡PREPÁRATE PARA ESCONDERTE!';
+      default:
+        return hunter ? 'PREPARA EL JAMÓN...' : '¡LOS AZULES VAN A SALIR!';
+    }
+  }
+
+  private introLine(): string {
+    const p = this.game_.player;
+    switch (this.mode) {
+      case 'infeccion':
+        return p.team === 'chaser' ? '¡ERES EL PACIENTE CERO! CONTAGIA A TODOS' : '¡QUE NO TE TOQUE EL INFECTADO!';
+      case 'bomba':
+        return '¡PASA EL JAMÓN ANTES DE QUE EXPLOTE!';
+      case 'escondite':
+        return p.team === 'chaser' ? 'CUENTA HASTA 30... Y A BUSCAR' : '¡ESCÓNDETE! PULSA E';
+      default:
+        return p.team === 'chaser' ? '¡A POR LOS ROJOS!' : '¡QUE NO TE PILLEN LOS AZULES!';
+    }
+  }
+
+  /** Nombre del papel y color según el modo. */
+  private role(p: SimChar): { label: string; color: number } {
+    switch (this.mode) {
+      case 'infeccion':
+        return p.team === 'chaser' ? { label: 'INFECTADO', color: INFECTED_GREEN } : { label: 'SUPERVIVIENTE', color: TEAM_COLORS.escapist.light };
+      case 'bomba':
+        return p.bomb ? { label: '¡LLEVAS EL JAMÓN!', color: 0xff5a5a } : { label: 'JAMÓN BOMBA', color: 0xfeae34 };
+      case 'escondite':
+        return p.team === 'chaser' ? { label: 'BUSCADOR', color: TEAM_COLORS.chaser.light } : { label: 'ESCONDIDO', color: TEAM_COLORS.escapist.light };
+      default: {
+        const TC = TEAM_COLORS[p.team];
+        return { label: `${TC.role} ${TC.team}`, color: TC.light };
+      }
+    }
+  }
+
+  /** Actualiza iconos y nombres de las casillas según lo que hace cada botón ahora. */
+  private refreshSlots(): void {
+    const p = this.game_.player;
+    for (let i = 0; i < 2; i++) {
+      const a = abilityFor(this.mode, p, i === 0 ? 'action' : 'special');
+      let icon = ABILITY_UI[a].icon;
+      let label = ABILITY_UI[a].label;
+      if (a === 'item') {
+        icon = p.heldItem ? `item_${p.heldItem}` : 'item_grenade';
+        label = p.heldItem === 'barrier' ? 'BARRERA' : p.heldItem === 'grenade' ? 'GRANADA' : 'VACÍO';
+      }
+      if (a === 'disguise' && p.disguise >= 0) {
+        icon = `prop_${p.disguise}_${p.rot}`;
+        label = 'CAMBIAR';
+      }
+      if (a !== this.slotAbility[i] || this.slotIcons[i].texture.key !== icon || this.slotIcons[i].visible !== (a !== 'none')) {
+        this.slotAbility[i] = a;
+        this.slotIcons[i].setTexture(icon).setRotation(ABILITY_UI[a].rot ?? 0).setVisible(a !== 'none');
+        this.slotLabels[i].setText(fontText(label));
+      }
+    }
+    if (this.slotLabels[2]) this.slotLabels[2].setText(fontText(this.mode === 'escondite' && p.disguise >= 0 ? 'QUIETO' : 'SPRINT'));
   }
 
   private onCountdown(n: number): void {
@@ -175,7 +307,7 @@ export class UIScene extends Phaser.Scene {
       audio.play('count');
       this.center.setText(String(n)).setTint(0xfee761).setAlpha(1).setScale(6);
       this.tweens.add({ targets: this.center, scale: 4, duration: 250, ease: 'Back.easeOut' });
-      this.centerSub.setText(fontText(this.team === 'chaser' ? 'PREPARA EL JAMÓN...' : '¡LOS AZULES VAN A SALIR!')).setTint(UI.text).setAlpha(1);
+      this.centerSub.setText(fontText(this.countdownLine())).setTint(UI.text).setAlpha(1);
     } else {
       audio.play('go');
       this.center.setText(fontText('¡YA!')).setTint(0x63c74d).setAlpha(1).setScale(6);
@@ -199,17 +331,20 @@ export class UIScene extends Phaser.Scene {
     while (this.feed.length > 6) this.feed.pop()!.t.destroy();
   }
 
-  private onEnd(winner: Team, won: boolean): void {
+  private onEnd(winner: Team, won: boolean, sub?: string): void {
     this.tweens.killTweensOf(this.center);
     this.tweens.killTweensOf(this.centerSub);
     const color = TEAM_COLORS[winner].light;
     this.center.setText(fontText(won ? '¡VICTORIA!' : 'DERROTA')).setTint(won ? 0xfee761 : 0xc2c3c7).setAlpha(1).setScale(6);
     this.tweens.add({ targets: this.center, scale: 4, duration: 300, ease: 'Back.easeOut' });
+    const info = modeInfo(this.mode);
+    const def = this.mode === 'pilla' ? (winner === 'chaser' ? 'GANA EL EQUIPO AZUL' : 'GANA EL EQUIPO ROJO') : `GANAN LOS ${winner === 'chaser' ? info.hunters : info.prey}`;
     this.centerSub
-      .setText(fontText(winner === 'chaser' ? 'GANA EL EQUIPO AZUL' : 'GANA EL EQUIPO ROJO'))
+      .setText(fontText(sub ?? def))
       .setTint(color)
       .setAlpha(1)
       .setScale(2);
+    if (won) this.hype.burst(this.W / 2, this.H / 2 - 30, 80);
   }
 
   update(_time: number, delta: number): void {
@@ -226,8 +361,8 @@ export class UIScene extends Phaser.Scene {
     const ping = (model as unknown as { ping?: number }).ping;
     this.pingText.setText(model.online && ping !== undefined ? `PING ${Math.round(ping)} MS` : '');
 
-    // feed
-    let fy = 6;
+    // feed (debajo de la fila superior para no tapar el reloj)
+    let fy = 48;
     for (const f of this.feed) {
       f.life -= dt;
       f.t.setY(fy);
@@ -239,29 +374,46 @@ export class UIScene extends Phaser.Scene {
       return f.life > 0;
     });
 
-    // temporizador
+    const ms = model.modeNet();
+    const mode = this.mode;
+    // temporizador (en Jamón Bomba, la ronda)
     const sec = Math.ceil(model.timeLeft);
-    const m = Math.floor(sec / 60);
-    const s = sec % 60;
-    this.timer.setText(`${m}:${s.toString().padStart(2, '0')}`);
-    const urgent = sec <= 10 && model.state === 'play';
-    this.timer.setTint(urgent ? (Math.floor(this.t * 4) % 2 ? 0xe43b44 : 0xffffff) : UI.text);
+    if (mode === 'bomba') {
+      this.timer.setText(fontText(`R${ms.r}`));
+      this.timer.setTint(UI.text);
+    } else {
+      const m = Math.floor(sec / 60);
+      const s = sec % 60;
+      this.timer.setText(`${m}:${s.toString().padStart(2, '0')}`);
+      const urgent = sec <= 10 && model.state === 'play';
+      this.timer.setTint(urgent ? (Math.floor(this.t * 4) % 2 ? 0xe43b44 : 0xffffff) : UI.text);
+    }
 
-    const escs = model.chars.filter((c) => !c.isChaser);
-    const alive = escs.filter((c) => c.free).length;
+    const role = this.role(p);
+    this.roleText.setText(fontText(role.label)).setTint(role.color);
+    this.refreshSlots();
+
+    // Quién cuenta como "presa" en la fila de puntitos.
+    const escs = mode === 'bomba' ? model.chars : model.chars.filter((c) => (mode === 'infeccion' ? true : !c.isChaser));
+    const alive = escs.filter((c) => c.free && (mode !== 'infeccion' || c.team === 'escapist')).length;
     const trappedN = escs.filter((c) => c.trapped > 0).length;
-    this.aliveText.setText(fontText(`LIBRES ${alive}/${escs.length}${trappedN ? ` · ATRAPADOS ${trappedN}` : ''}`));
+    let line = '';
+    if (mode === 'pilla') line = `LIBRES ${alive}/${escs.length}${trappedN ? ` · ATRAPADOS ${trappedN}` : ''}`;
+    else if (mode === 'infeccion') line = `SUPERVIVIENTES ${ms.n}/${ms.tot}`;
+    else if (mode === 'bomba') line = ms.ph === 1 && model.state === 'play' ? `VIVOS ${ms.n} · NUEVA RONDA EN ${Math.ceil(ms.pt / 10)}` : `VIVOS ${ms.n}/${ms.tot}`;
+    else line = ms.ph === 0 ? `ESCONDIDOS ${ms.n}/${ms.tot}` : `ESCONDIDOS ${ms.n}/${ms.tot} · PISTA EN ${ms.nh}S`;
+    this.aliveText.setText(fontText(line));
 
     const d = this.dyn;
     d.clear();
-    // puntitos de escapistas
+    // puntitos de las presas
     const total = escs.length;
     const startX = VIEW_W / 2 - (total * 7) / 2 + 3;
     escs.forEach((c, i) => {
       const x = Math.round(startX + i * 7);
       const y = 40;
       d.fillStyle(0x0d0b14, 1).fillRect(x - 3, y - 3, 6, 6);
-      const col = !c.alive
+      let col = !c.alive
         ? 0x3a4466
         : c.trapped > 0
           ? Math.floor(this.t * 4) % 2
@@ -270,11 +422,27 @@ export class UIScene extends Phaser.Scene {
           : c.id === model.playerId
             ? 0xfee761
             : TEAM_COLORS.escapist.main;
+      if (mode === 'infeccion' && c.alive && c.team === 'chaser') col = c.id === model.playerId ? 0xe6ff5a : 0x3e8948;
+      if (mode === 'bomba' && c.alive && c.bomb) col = Math.floor(this.t * 6) % 2 ? 0xff5a5a : 0xfeae34;
       d.fillStyle(col, 1).fillRect(x - 2, y - 2, 4, 4);
     });
 
+    this.updateModeHud(dt, ms, p);
+
     // fila 2 y barras
-    if (chaser) {
+    if (mode === 'escondite' && chaser) {
+      this.row2Label.setText(String(p.stats.finds));
+      this.hpText.setText(String(Math.ceil(p.hp)));
+      const ratio = p.hp / MODES.escondite.seekerHp;
+      const col = ratio > 0.5 ? 0x7cc8ff : ratio > 0.25 ? 0xfeae34 : 0xe43b44;
+      this.bar(d, 20, 19, 88, 6, ratio, col, 0x1d2a44);
+      this.hpText.setTint(col);
+    } else if (mode === 'infeccion' || mode === 'bomba') {
+      this.row2Label.setText(mode === 'infeccion' && chaser ? String(p.stats.infections) : '');
+      this.hpText.setText(fontText(mode === 'bomba' ? `RONDA ${ms.r}` : chaser ? 'CONTAGIA' : 'CORRE'));
+      this.hpText.setTint(mode === 'infeccion' && chaser ? INFECTED_GREEN : UI.text);
+      this.bar(d, 20, 19, 60, 6, 1, mode === 'infeccion' && chaser ? 0x3e8948 : 0x63c74d, 0x5a2030);
+    } else if (chaser) {
       this.row2Label.setText(String(p.stats.eliminations));
       // impulso en línea recta (los perseguidores aceleran si no giran)
       const bonus = Math.min(1, p.straightTime / BALANCE.chaser.straightBonusTime);
@@ -294,8 +462,8 @@ export class UIScene extends Phaser.Scene {
     this.bar(d, 20, 31, 88, 4, eRatio, exhausted ? 0x8b9bb4 : 0x7cc8ff, 0x1d2a44);
 
     // cooldowns
-    const readies = [p.actionReady, p.specialReady, p.exhaustTimer > 0 ? 0 : p.energy / p.energyMax];
-    readies.forEach((r, i) => {
+    const readies = [p.actionReady(this.slotAbility[0]), p.specialReady(this.slotAbility[1]), p.exhaustTimer > 0 ? 0 : p.energy / p.energyMax, p.disguise >= 0 ? 1 : 0.3];
+    readies.slice(0, this.slotIcons.length).forEach((r, i) => {
       const x = 8 + i * 40;
       const y = VIEW_H - 40;
       if (r < 1) {
@@ -316,7 +484,13 @@ export class UIScene extends Phaser.Scene {
 
     // viñeta de vida baja
     this.vignette.clear();
-    if (!chaser && p.alive && p.hp <= 25) {
+    if (p.bomb && p.alive) {
+      const u = ms.b[ms.b.indexOf(p.id) + 1] ?? 0;
+      const a = 0.25 + Math.sin(this.t * (6 + u * 8)) * 0.15;
+      const w = 4 + u * 3;
+      this.vignette.fillStyle(0xff3a3a, a);
+      this.vignette.fillRect(0, 0, VIEW_W, w).fillRect(0, VIEW_H - w, VIEW_W, w).fillRect(0, 0, w, VIEW_H).fillRect(VIEW_W - w, 0, w, VIEW_H);
+    } else if (mode !== 'infeccion' && mode !== 'bomba' && !(mode === 'pilla' && chaser) && p.alive && p.hp <= 25) {
       const a = 0.25 + Math.sin(this.t * 6) * 0.12;
       this.vignette.fillStyle(0xe43b44, a);
       this.vignette.fillRect(0, 0, VIEW_W, 4).fillRect(0, VIEW_H - 4, VIEW_W, 4).fillRect(0, 0, 4, VIEW_H).fillRect(VIEW_W - 4, 0, 4, VIEW_H);
@@ -328,9 +502,104 @@ export class UIScene extends Phaser.Scene {
       this.trapHint.setText(
         fontText(p.rescueProg > 0 ? `¡TE ESTÁN RESCATANDO! ${Math.round(p.rescueProg * 100)}%` : `ENJAMONADO · ${Math.ceil(p.trapped)} S PARA QUE TE RESCATEN`),
       );
-    this.hiddenHint.setVisible(p.alive && p.inBush && model.state === 'play');
+    this.hiddenHint.setVisible(p.alive && p.inBush && model.state === 'play' && p.disguise < 0);
+    if (this.mode === 'escondite' && p.alive && !chaser && model.state === 'play') {
+      this.hiddenHint
+        .setText(fontText(p.disguise >= 0 ? (p.anchored ? 'ANCLADO' : 'SHIFT: QUIETO') : `${keyName(settings.bindings.special)}: DISFRAZ`))
+        .setTint(p.disguise >= 0 ? 0x63c74d : 0xfee761)
+        .setVisible(true);
+    }
 
     this.drawMinimap();
+    this.drawDarkness();
+    this.hype.update(dt);
+  }
+
+  /** Avisos propios de cada modo: fase de esconderse, jamón bomba, último superviviente, ruleta... */
+  private updateModeHud(dt: number, ms: ReturnType<GameScene['model']['modeNet']>, p: SimChar): void {
+    const model = this.game_.model;
+    const playing = model.state === 'play';
+    // Escondite: cuenta atrás para esconderse; los buscadores, a oscuras.
+    const hiding = this.mode === 'escondite' && ms.ph === 0 && model.state !== 'ended';
+    const blindNow = hiding && p.team === 'chaser';
+    this.blind.setVisible(blindNow);
+    this.blindText.setVisible(hiding);
+    if (hiding) {
+      const left = Math.ceil(ms.pt / 10);
+      this.blindText
+        .setText(fontText(blindNow ? `CONTANDO... ${left}` : `¡ESCÓNDETE! ${left}`))
+        .setPosition(this.W / 2, blindNow ? this.H / 2 : 74)
+        .setScale(blindNow ? 3 : 2)
+        .setTint(left <= 5 ? 0xff5a5a : 0xfee761);
+    }
+    // Jamón bomba: ¿lo llevas tú? ¿quién lo lleva?
+    if (this.mode === 'bomba' && playing) {
+      if (p.bomb) {
+        this.bombWarn.setText(fontText('¡TIENES EL JAMÓN! ¡PÁSALO!')).setVisible(true).setScale(2 + Math.sin(this.t * 10) * 0.15);
+      } else this.bombWarn.setVisible(false);
+      // Sonido de mecha que se acelera.
+      let maxU = -1;
+      for (let i = 1; i < ms.b.length; i += 2) maxU = Math.max(maxU, ms.b[i]);
+      if (maxU >= 0) {
+        this.fuseT -= dt;
+        if (this.fuseT <= 0) {
+          this.fuseT = maxU === 2 ? 0.09 : maxU === 1 ? 0.22 : 0.45;
+          audio.play('fuse');
+          if (maxU === 2 && p.bomb) audio.play('tick');
+        }
+      }
+    } else this.bombWarn.setVisible(false);
+    // Infección: la música se acelera según quedan menos supervivientes.
+    if (this.mode === 'infeccion' && playing && ms.tot > 0) {
+      const k = 1 + (1 - ms.n / ms.tot) * 0.45;
+      if (Math.abs(k - this.lastTempo) > 0.02) {
+        this.lastTempo = k;
+        audio.setTempo(k);
+      }
+    }
+    // Efecto global de la ruleta activo.
+    this.effectText.setText(ms.fx ? fontText(`${GLOBAL_LABELS[ms.fx] ?? ms.fx} ${ms.ft}S`) : '').setTint(Math.floor(this.t * 4) % 2 ? 0xff7ab8 : 0xfee761);
+    // Tirada personal disponible.
+    const canSpin = playing && p.alive && p.spinsLeft > 0 && model.matchTime >= HYPE.personalFrom;
+    this.spinText
+      .setText(canSpin ? fontText(`${keyName(settings.bindings.spin)}: ¡RULETA!`) : '')
+      .setScale(canSpin ? 1 + Math.max(0, Math.sin(this.t * 5)) * 0.15 : 1);
+    this.modeText.setText('');
+  }
+
+  /** Oscuridad de los modos nocturnos: capa negra con agujeros de luz. */
+  private drawDarkness(): void {
+    const rt = this.dark;
+    if (!rt) return;
+    const gs = this.game_;
+    const model = gs.model;
+    const v = gs.cameras.main.worldView;
+    const viewer = gs.player;
+    rt.clear();
+    rt.fill(0x05040c, this.mode === 'escondite' ? 0.86 : 0.74);
+    const L = this.lightRound;
+    const put = (x: number, y: number, r: number) => {
+      const sx = x - v.x;
+      const sy = y - v.y;
+      if (sx < -r || sy < -r || sx > this.W + r || sy > this.H + r) return;
+      L.setPosition(sx, sy).setScale(r / 64);
+      rt.erase(L);
+    };
+    // farolas del mapa (objetos de verdad)
+    for (const pr of model.props) if (pr.k === 1) put(pr.x, pr.y - 14, 38);
+    for (const c of model.chars) {
+      if (!c.alive) continue;
+      const me = c === viewer;
+      if (c.disguise >= 0 && !me) continue;
+      put(c.x, c.y - 6, me ? 70 : this.mode === 'infeccion' && c.team === 'chaser' ? 22 : 30);
+      // Linterna de los buscadores (y de los supervivientes).
+      if ((this.mode === 'escondite' && c.team === 'chaser') || (this.mode === 'infeccion' && c.team === 'escapist')) {
+        const len = this.mode === 'escondite' ? 1 : 0.7;
+        this.lightCone.setPosition(c.x - v.x, c.y - 6 - v.y).setRotation(Math.atan2(c.fy, c.fx)).setScale(len);
+        rt.erase(this.lightCone);
+      }
+    }
+    if (!viewer.alive) put(viewer.x, viewer.y, 90);
   }
 
   // ------------------------------------------------------------------ rueda de frases (T)
@@ -343,7 +612,7 @@ export class UIScene extends Phaser.Scene {
       return;
     }
     if (!this.wheelOpen) return;
-    const ids = PHRASES.wheel[this.team];
+    const ids = this.wheelIds();
     // 1-8 eligen directamente; ESPACIO/A confirma; E/X pasa a la siguiente
     for (let i = 0; i < ids.length; i++) {
       if (input.keyPressed(`Digit${i + 1}`) || input.keyPressed(`Numpad${i + 1}`)) {
@@ -359,14 +628,14 @@ export class UIScene extends Phaser.Scene {
   private openWheel(): void {
     audio.play('hover');
     this.wheelOpen = true;
-    const ids = PHRASES.wheel[this.team];
+    const ids = this.wheelIds();
     const cx = this.W / 2;
     const cy = this.H / 2 - 6;
     const R = 62;
     const c = this.add.container(0, 0).setDepth(100);
     const g = this.add.graphics();
     g.fillStyle(0x0d0b14, 0.55).fillCircle(cx, cy, R + 26);
-    g.lineStyle(1, TEAM_COLORS[this.team].light, 0.8).strokeCircle(cx, cy, R + 26);
+    g.lineStyle(1, TEAM_COLORS[this.game_.player.team].light, 0.8).strokeCircle(cx, cy, R + 26);
     c.add(g);
     c.add(text(this, cx, cy, 'FRASES', { color: UI.focusLight }));
     c.add(text(this, cx, cy + 10, '1-8 · CLIC', { color: UI.muted }));
@@ -389,10 +658,16 @@ export class UIScene extends Phaser.Scene {
   }
 
   private pickPhrase(i: number): void {
-    const pid = PHRASES.wheel[this.team][i];
+    const pid = this.wheelIds()[i];
     if (pid !== undefined) this.game_.model.say(pid);
     audio.play('click');
     this.closeWheel();
+  }
+
+  private wheelIds(): readonly number[] {
+    const team = this.game_.player.team;
+    if (this.mode === 'pilla') return PHRASES.wheel[team];
+    return PHRASES.modeWheel[this.mode][team];
   }
 
   private closeWheel(): void {
@@ -426,8 +701,21 @@ export class UIScene extends Phaser.Scene {
     for (const c of gs.model.chars) {
       if (!c.alive || c.id === viewer.id) continue;
       if (c.team !== viewer.team && c.inBush && Math.hypot(c.x - viewer.x, c.y - viewer.y) > BALANCE.terrain.bushRevealDistance) continue;
+      // En el Escondite, el radar no chiva a los del otro equipo; los invisibles no salen.
+      if (this.mode === 'escondite' && c.team !== viewer.team && viewer.alive) continue;
+      if (c.invisible > 0 && c.team !== viewer.team) continue;
+      let col = c.isChaser ? TEAM_COLORS.chaser.light : c.trapped > 0 ? 0xfeae34 : TEAM_COLORS.escapist.main;
+      if (this.mode === 'infeccion' && c.team === 'chaser') col = 0x63c74d;
+      if (this.mode === 'bomba') col = c.bomb ? (Math.floor(this.t * 6) % 2 ? 0xff5a5a : 0xfeae34) : 0xffffff;
       g.fillStyle(0x0d0b14, 1).fillRect(Math.round(c.x * k) - 2, Math.round(c.y * k) - 2, 4, 4);
-      g.fillStyle(c.isChaser ? TEAM_COLORS.chaser.light : c.trapped > 0 ? 0xfeae34 : TEAM_COLORS.escapist.main, 1).fillRect(Math.round(c.x * k) - 1, Math.round(c.y * k) - 1, 2, 2);
+      g.fillStyle(col, 1).fillRect(Math.round(c.x * k) - 1, Math.round(c.y * k) - 1, 2, 2);
+    }
+    // Infección: los infectados ven al último superviviente cada pocos segundos.
+    const ms = gs.model.modeNet();
+    if (this.mode === 'infeccion' && ms.pg.length === 2 && viewer.team === 'chaser') {
+      const r = 3 + (this.t * 6) % 6;
+      g.lineStyle(1, 0xff5a5a, 1).strokeCircle(Math.round(ms.pg[0] * k), Math.round(ms.pg[1] * k), r);
+      g.fillStyle(0xff5a5a, 1).fillRect(Math.round(ms.pg[0] * k) - 1, Math.round(ms.pg[1] * k) - 1, 3, 3);
     }
     if (Math.floor(this.t * 4) % 2 === 0 || !viewer.alive) {
       g.fillStyle(0x0d0b14, 1).fillRect(Math.round(viewer.x * k) - 2, Math.round(viewer.y * k) - 2, 5, 5);

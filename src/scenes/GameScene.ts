@@ -5,26 +5,43 @@ import { profile } from '../config/profile';
 import { audio } from '../core/audio';
 import { input } from '../core/input';
 import { voice } from '../core/voice';
+import { HYPE } from '../../shared/balance';
 import { botName, Look, randomLook } from '../../shared/look';
+import { BiomeId, MapId, styleOf } from '../../shared/maps';
 import { scaleFor } from '../../shared/mapScale';
+import { defaultHunters, modeInfo } from '../../shared/modes/rules';
 import type { SimChar } from '../../shared/sim/Char';
-import type { RosterEntry, SimEvent, Stats, Team } from '../../shared/sim/types';
-import { CharacterView } from '../game/CharacterView';
+import type { ModeId, RosterEntry, SimEvent, Stats, Team } from '../../shared/sim/types';
+import { CharacterView, CharStyle, ViewCtx } from '../game/CharacterView';
 import { GameModel, OfflineModel } from '../game/model';
 import { OnlineModel } from '../net/OnlineModel';
-import { PICKUP_COLORS, PICKUP_NAMES, PickupView, ProjectileView } from '../game/views';
+import { PICKUP_COLORS, PICKUP_NAMES, PickupView, ProjectileView, PropView } from '../game/views';
+import type { Outfit } from '../gfx/characters';
 import { Fx } from '../gfx/fx';
 import { TEAM_COLORS } from '../gfx/palette';
+import { GLOBAL_LABELS, PRIZE_LABELS } from '../ui/hype';
 import { GameMap } from '../world/GameMap';
-import { BiomeId } from '../world/maps';
 import { viewSize } from './common';
 
 export interface GameData {
-  mapId?: BiomeId;
+  mode?: ModeId;
+  mapId?: MapId;
   role?: Team;
+  /** Caballo elegido para la carrera. */
+  horse?: number;
   /** Partida online ya preparada (si no, se crea una partida offline con bots). */
   model?: GameModel;
 }
+
+/** Atuendo de cada personaje según el modo y la ciudad. */
+export function outfitFor(mode: ModeId, style: BiomeId, team: Team): Outfit {
+  if (mode === 'bomba') return 'casual';
+  if (mode === 'infeccion') return team === 'chaser' ? 'zombie' : 'guchi';
+  if (team === 'escapist') return 'guchi';
+  return style === 'paris' ? 'police' : style === 'ceuta' ? 'military' : style === 'barcelona' ? 'street' : 'blue';
+}
+
+const HINT_SFX = ['hintWhistle', 'hintGiggle', 'hintOink', 'hintSqueak'] as const;
 
 export interface ResultEntry {
   name: string;
@@ -36,9 +53,14 @@ export interface ResultEntry {
 }
 
 export interface ResultsData {
-  mapId: BiomeId;
+  mode: ModeId;
+  mapId: MapId;
   role: Team;
   winner: Team;
+  /** Ganador individual (Jamón Bomba / Leyenda) y caballo ganador. */
+  champion: string | null;
+  horse: number;
+  myHorse: number;
   timePlayed: number;
   duration: number;
   entries: ResultEntry[];
@@ -64,6 +86,10 @@ export class GameScene extends Phaser.Scene {
   private finished = false;
   private smokePuff = 0;
   private ambient!: Phaser.GameObjects.Particles.ParticleEmitter;
+  private propViews: PropView[] = [];
+  private barrierViews = new Map<number, Phaser.GameObjects.Image>();
+  private style!: CharStyle;
+  private bigHeads = false;
 
   constructor() {
     super('Game');
@@ -84,6 +110,9 @@ export class GameScene extends Phaser.Scene {
     this.lastWarnSecond = -1;
     this.endTimer = 0;
     this.finished = false;
+    this.propViews = [];
+    this.barrierViews = new Map();
+    this.bigHeads = false;
     const params = new URLSearchParams(window.location.search);
     this.autotest = params.has('autotest') && !data.model;
     this.simSpeed = this.autotest ? Math.max(1, Math.min(8, Number(params.get('speed') ?? 4))) : 1;
@@ -93,9 +122,18 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.fadeIn(250, 13, 11, 20);
     this.model = this.data_.model ?? this.createOffline();
 
-    this.map = new GameMap(this, this.model.mapId, this.model.grid);
-    this.fx = new Fx(this, this.model.mapId);
+    const style = styleOf(this.model.mapId);
+    this.map = new GameMap(this, style, this.model.grid);
+    this.fx = new Fx(this, style);
     this.createAmbient();
+    const mode = this.model.mode;
+    this.style = {
+      outfit: (c) => outfitFor(mode, style, c.team),
+      hasHam: (c) => c.team === 'chaser' && (mode === 'pilla' || mode === 'escondite'),
+      indicator: (c) => (mode === 'bomba' ? 'ind_neutral' : mode === 'infeccion' && c.team === 'chaser' ? 'ind_infected' : c.isChaser ? 'ind_chaser' : 'ind_escapist'),
+    };
+    // Objetos del Escondite (mismo dibujo que los escondidos disfrazados).
+    for (const pr of this.model.props) this.propViews.push(new PropView(this, pr.x, pr.y, pr.k, pr.rot));
 
     const cam = this.cameras.main;
     cam.setRoundPixels(true);
@@ -106,6 +144,7 @@ export class GameScene extends Phaser.Scene {
     cam.centerOn(p.x, p.y);
     this.scale.on(Phaser.Scale.Events.RESIZE, this.onResize, this);
 
+    audio.setTempo(1);
     audio.playMusic('game');
     this.scene.launch('UI');
     this.scene.bringToTop('UI');
@@ -114,10 +153,18 @@ export class GameScene extends Phaser.Scene {
   }
 
   private createOffline(): GameModel {
-    const role: Team = this.data_.role ?? 'escapist';
-    const mapId: BiomeId = this.data_.mapId ?? 'forest';
-    const nCh = settings.chasers;
-    const nEs = settings.escapists;
+    const mode: ModeId = this.data_.mode ?? 'pilla';
+    let role: Team = this.data_.role ?? 'escapist';
+    const mapId: MapId = this.data_.mapId ?? 'forest';
+    let nCh = settings.chasers;
+    let nEs = settings.escapists;
+    if (mode !== 'pilla') {
+      // Mismo total de personajes; el modo decide cuántos cazadores.
+      const total = nCh + nEs;
+      nCh = Math.max(1, defaultHunters(mode, total));
+      nEs = total - nCh;
+      if (mode === 'bomba') role = 'escapist';
+    }
     const playerIndex = Math.floor(Math.random() * (role === 'chaser' ? nCh : nEs));
     const roster: RosterEntry[] = [];
     let id = 0;
@@ -125,19 +172,21 @@ export class GameScene extends Phaser.Scene {
     for (let i = 0; i < nCh; i++) {
       const me = role === 'chaser' && i === playerIndex;
       const name = botName(botI++);
-      roster.push({ id: id++, team: 'chaser', name: me ? profile.look.name : name, look: me ? profile.look : randomLook(name), human: me && !this.autotest });
+      const horse = me && this.data_.horse !== undefined ? this.data_.horse : Math.floor(Math.random() * HYPE.horses.length);
+      roster.push({ id: id++, team: 'chaser', name: me ? profile.look.name : name, look: me ? profile.look : randomLook(name), human: me && !this.autotest, horse });
     }
     for (let i = 0; i < nEs; i++) {
       const me = role === 'escapist' && i === playerIndex;
       const name = botName(botI++);
-      roster.push({ id: id++, team: 'escapist', name: me ? profile.look.name : name, look: me ? profile.look : randomLook(name), human: me && !this.autotest });
+      const horse = me && this.data_.horse !== undefined ? this.data_.horse : Math.floor(Math.random() * HYPE.horses.length);
+      roster.push({ id: id++, team: 'escapist', name: me ? profile.look.name : name, look: me ? profile.look : randomLook(name), human: me && !this.autotest, horse });
     }
     const playerId = roster.find((r) => r.team === role && (r.human || this.autotest))!.id;
     const pid = this.autotest ? roster.filter((r) => r.team === role)[playerIndex].id : playerId;
-    return new OfflineModel(
-      { mapId, scale: scaleFor(roster.length), duration: settings.duration, difficulty: settings.difficulty, roster },
-      pid,
-    );
+    // En los modos nuevos, la duración por defecto es la del modo si no se ha cambiado.
+    const info = modeInfo(mode);
+    const duration = mode === 'pilla' || settings.duration !== BALANCE.match.defaultDuration ? settings.duration : info.duration || settings.duration;
+    return new OfflineModel({ mode, mapId, scale: scaleFor(roster.length, mapId), duration, difficulty: settings.difficulty, roster }, pid);
   }
 
   /** Zoom entero según la ventana; si el mapa es más pequeño que la vista, queda centrado. */
@@ -157,7 +206,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private createAmbient(): void {
-    const id = this.model.mapId;
+    const id = styleOf(this.model.mapId);
     const cfg: Phaser.Types.GameObjects.Particles.ParticleEmitterConfig =
       id === 'snow'
         ? { x: { min: -20, max: 1000 }, y: -6, lifespan: 6000, speedY: { min: 14, max: 30 }, speedX: { min: -10, max: 6 }, scale: { min: 1, max: 2 }, alpha: { min: 0.6, max: 1 }, frequency: 50, tint: 0xffffff }
@@ -179,6 +228,11 @@ export class GameScene extends Phaser.Scene {
     for (const v of this.views.values()) v.destroy();
     for (const v of this.pickupViews.values()) v.destroy();
     for (const v of this.projViews.values()) v.destroy();
+    for (const v of this.propViews) v.destroy();
+    for (const v of this.barrierViews.values()) v.destroy();
+    this.propViews = [];
+    this.barrierViews.clear();
+    audio.setTempo(1);
     this.views.clear();
     this.pickupViews.clear();
     this.projViews.clear();
@@ -187,7 +241,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   cycleSpectate(): void {
-    const alive = this.model.chars.filter((c) => c.free && !c.isChaser);
+    const mode = this.model.mode;
+    const alive = this.model.chars.filter((c) => c.free && (mode === 'bomba' || mode === 'infeccion' || !c.isChaser));
     if (!alive.length) return;
     const i = this.spectate ? alive.indexOf(this.spectate) : -1;
     this.spectate = alive[(i + 1) % alive.length];
@@ -226,6 +281,11 @@ export class GameScene extends Phaser.Scene {
       else this.cycleSpectate();
     }
     if (input.justPressed('special') && p.alive) this.model.press('special');
+    if (input.justPressed('rotate') && p.alive) this.model.press('rotate');
+    if (input.justPressed('spin') && p.alive) {
+      if (p.spinsLeft > 0 && this.model.matchTime >= HYPE.personalFrom && this.model.state === 'play') this.model.press('spin');
+      else audio.play('denied');
+    }
   }
 
   private step(realDt: number): void {
@@ -286,17 +346,27 @@ export class GameScene extends Phaser.Scene {
         this.events.emit('countdown', e.n);
         break;
       case 'release':
-        this.events.emit('announce', '¡SALEN LOS AZULES!', TEAM_COLORS.chaser.light, false);
+        this.events.emit('announce', m.mode === 'infeccion' ? '¡EL INFECTADO SE DESPIERTA!' : '¡SALEN LOS AZULES!', m.mode === 'infeccion' ? 0x9cff5a : TEAM_COLORS.chaser.light, false);
         audio.play('go');
         break;
       case 'end': {
         audio.playMusic(null);
-        const won = e.winner === me.team;
+        audio.setTempo(1);
+        const champ = e.ch !== undefined && e.ch >= 0 ? this.charOf(e.ch) : undefined;
+        const won = m.mode === 'bomba' ? e.ch === me.id : e.winner === me.team;
         audio.play(won ? 'win' : 'lose');
-        this.events.emit('end', e.winner, won);
+        let sub: string | undefined;
+        if (m.mode === 'bomba') sub = champ ? `¡${champ.name} ES EL ÚLTIMO EN PIE!` : 'NADIE SOBREVIVE';
+        else if (m.mode === 'infeccion' && e.winner === 'escapist' && champ) sub = `¡${champ.name} ES UNA LEYENDA!`;
+        this.events.emit('end', e.winner, won, sub);
+        if (won) {
+          this.fx.confetti(me.x, me.y - 30, 60);
+          this.events.emit('burst', 80);
+        }
         if (this.autotest) {
           const alive = m.chars.filter((c) => c.alive && !c.isChaser).length;
-          console.info(`[autotest] map=${m.mapId} winner=${e.winner} time=${m.matchTime.toFixed(1)} alive=${alive}`);
+          const coins = m.chars.reduce((a, c) => a + c.stats.coins, 0);
+          console.info(`[autotest] mode=${m.mode} map=${m.mapId} winner=${e.winner} ch=${e.ch ?? -1} time=${m.matchTime.toFixed(1)} alive=${alive} coins=${coins}`);
         }
         break;
       }
@@ -475,6 +545,164 @@ export class GameScene extends Phaser.Scene {
         }
         break;
       }
+      case 'infect': {
+        const v = this.charOf(e.v);
+        if (!v) break;
+        if (this.near(v.x, v.y) || e.v === me.id) {
+          audio.play('infect');
+          fx.infect(v.x, v.y - 8);
+          this.shake(e.v === me.id ? 0.012 : 0.004, 200);
+        }
+        const by = this.charOf(e.a);
+        if (e.v === me.id) {
+          this.events.emit('announce', '¡TE HAN INFECTADO! AHORA CONTAGIA', 0x9cff5a, true);
+          this.events.emit('flash', 0x63c74d, 0.45);
+        } else if (e.a === me.id) {
+          fx.float(v.x, v.y - 26, '¡CONTAGIADO!', 0x9cff5a, true);
+          this.events.emit('announce', `¡HAS INFECTADO A ${v.name}!`, 0x9cff5a, false);
+        } else this.events.emit('feed', `${by?.name ?? '?'} INFECTA A ${v.name}`, 0x9cff5a);
+        break;
+      }
+      case 'last': {
+        const c = this.charOf(e.id);
+        audio.play('alarm');
+        if (e.id === me.id) this.events.emit('announce', '¡ERES EL ÚLTIMO SUPERVIVIENTE!', 0xff5a5a, true);
+        else this.events.emit('announce', `¡ÚLTIMO SUPERVIVIENTE: ${c?.name ?? '?'}!`, 0xff5a5a, true);
+        this.events.emit('flash', 0xff3a3a, 0.3);
+        break;
+      }
+      case 'round': {
+        audio.play('reveal');
+        const names = e.ids.map((id) => this.charOf(id)?.name ?? '?').join(' Y ');
+        this.events.emit('announce', `RONDA ${e.n}: ${e.ids.includes(me.id) ? '¡TIENES EL JAMÓN!' : `LO LLEVA ${names}`}`, 0xfeae34, true);
+        for (const id of e.ids) {
+          const c = this.charOf(id);
+          if (c) fx.ring(c.x, c.y - 10, 0xfeae34, 40);
+        }
+        if (e.ids.includes(me.id)) this.events.emit('flash', 0xff3a3a, 0.35);
+        break;
+      }
+      case 'pass': {
+        const a = this.charOf(e.from);
+        const b = this.charOf(e.to);
+        if (b && (this.near(b.x, b.y) || e.to === me.id || e.from === me.id)) {
+          audio.play('pass');
+          fx.ring(b.x, b.y - 10, 0xfeae34, 26);
+          fx.float(b.x, b.y - 30, '¡PARA TI!', 0xfeae34);
+        }
+        if (e.to === me.id) {
+          this.events.emit('announce', `¡${a?.name ?? '?'} TE PASA EL JAMÓN!`, 0xff5a5a, true);
+          this.events.emit('flash', 0xff3a3a, 0.3);
+          this.shake(0.006, 140);
+        } else if (e.from === me.id) this.events.emit('announce', '¡QUITADO DE ENCIMA!', 0x63c74d, false);
+        break;
+      }
+      case 'boom': {
+        const c = this.charOf(e.id);
+        audio.play('boom');
+        fx.explosion(e.x, e.y - 8);
+        this.shake(this.near(e.x, e.y) ? 0.02 : 0.006, 380);
+        if (e.id === me.id) {
+          this.events.emit('announce', '¡BUM! TE HA EXPLOTADO EL JAMÓN', 0xff5a5a, true);
+          this.events.emit('flash', 0xffffff, 0.8);
+        } else this.events.emit('announce', `¡BUM! ${c?.name ?? '?'} ELIMINADO`, 0xfeae34, true);
+        break;
+      }
+      case 'seek':
+        audio.play('go');
+        this.events.emit('announce', me.isChaser ? '¡A BUSCAR! GOLPEA LO SOSPECHOSO' : '¡YA VIENEN! NO TE MUEVAS', TEAM_COLORS.chaser.light, true);
+        break;
+      case 'hint': {
+        const c = this.charOf(e.id);
+        if (!c) break;
+        const d = Math.hypot(e.x - me.x, e.y - me.y);
+        if (d < 260 || e.id === me.id) audio.play(HINT_SFX[e.s % HINT_SFX.length]);
+        const img = this.add.image(e.x, e.y - 22, 'p_hint').setDepth(9500).setScale(0.5);
+        this.tweens.add({ targets: img, scale: 1.5, y: e.y - 34, alpha: 0, duration: 1400, ease: 'Cubic.easeOut', onComplete: () => img.destroy() });
+        fx.ring(e.x, e.y - 6, 0xfee761, 28);
+        if (e.id === me.id) this.events.emit('feed', '¡HAS HECHO RUIDO! (PISTA)', 0xfee761);
+        break;
+      }
+      case 'miss': {
+        const pv = this.propViews[e.pid];
+        pv?.hit();
+        if (pv && this.near(pv.x, pv.y)) {
+          audio.play('miss');
+          fx.float(pv.x, pv.y - 22, '¡ERA REAL!', 0xff5a5a);
+          fx.debrisAt(pv.x, pv.y - 6, [0x8b9bb4, 0xc2c3c7]);
+        }
+        if (e.id === me.id) {
+          this.events.emit('flash', 0xe43b44, 0.25);
+          this.events.emit('feed', `OBJETO DE VERDAD: -${8} VIDA`, 0xff5a5a);
+        }
+        break;
+      }
+      case 'disguise': {
+        const c = this.charOf(e.id);
+        if (!c) break;
+        if (this.near(c.x, c.y)) audio.play('poof');
+        fx.smokePuff(c.x, c.y - 4, 5);
+        if (e.k < 0 && this.near(c.x, c.y)) fx.float(c.x, c.y - 26, '¡ENCONTRADO!', 0xfee761, true);
+        if (e.k < 0 && e.id === me.id) this.events.emit('announce', '¡TE HAN ENCONTRADO! ¡CORRE!', 0xff5a5a, true);
+        break;
+      }
+      case 'barrier':
+        for (const t of e.tiles) {
+          if (e.on) {
+            const c = m.grid.tileCenter(t);
+            const img = this.add.image(c.x, c.y + 8, 'barrier_tile').setOrigin(0.5, 1).setDepth(c.y + 7).setScale(1, 0);
+            this.tweens.add({ targets: img, scaleY: 1, duration: 160, ease: 'Back.easeOut' });
+            this.barrierViews.get(t)?.destroy();
+            this.barrierViews.set(t, img);
+            fx.dustAt(c.x, c.y + 6, 3);
+          } else {
+            const img = this.barrierViews.get(t);
+            if (img) this.tweens.add({ targets: img, alpha: 0, duration: 200, onComplete: () => img.destroy() });
+            this.barrierViews.delete(t);
+          }
+        }
+        if (e.on) audio.play('block');
+        break;
+      case 'coin': {
+        const c = this.charOf(e.id);
+        if (e.id === me.id) {
+          this.events.emit('coin', e.n, e.c);
+          if (c) fx.float(c.x, c.y - 30, e.c > 1 ? `+${e.n} X${e.c}` : `+${e.n}`, 0xffd23f);
+        }
+        break;
+      }
+      case 'medal':
+        if (e.id === me.id) this.events.emit('medal', e.m);
+        break;
+      case 'roulette': {
+        if (e.kind === 'global') this.events.emit('roulette', 'global', e.r, '¡RULETA PARA TODOS!');
+        else if (e.id === me.id) this.events.emit('roulette', 'me', e.r, 'TU RULETA');
+        else this.events.emit('feed', `${this.charOf(e.id)?.name ?? '?'} TIRA DE LA RULETA`, 0xffd23f);
+        break;
+      }
+      case 'effect': {
+        if (e.id < 0) {
+          if (e.e === 'cabezones') this.bigHeads = e.on;
+          if (e.on) {
+            this.events.emit('announce', `¡${GLOBAL_LABELS[e.e] ?? e.e}!`, 0xff7ab8, true);
+            this.shake(0.004, 200);
+          }
+        } else if (e.on) {
+          const c = this.charOf(e.id);
+          if (c) {
+            fx.sparkle(c.x, c.y - 10, 0xffd23f);
+            if (e.id !== me.id) this.events.emit('feed', `${c.name}: ${PRIZE_LABELS[e.e] ?? e.e}`, 0xffd23f);
+            else fx.confetti(c.x, c.y - 20, 30);
+          }
+        }
+        break;
+      }
+      case 'race':
+        this.events.emit('race', e.w);
+        break;
+      case 'raceEnd':
+        this.events.emit('raceEnd', e.w);
+        break;
       case 'say': {
         const c = this.charOf(e.id);
         if (!c) break;
@@ -491,7 +719,7 @@ export class GameScene extends Phaser.Scene {
     const m = this.model;
     const showNames = m.online;
     for (const c of m.chars) {
-      if (!this.views.has(c.id)) this.views.set(c.id, new CharacterView(this, c, c.id === m.playerId, showNames));
+      if (!this.views.has(c.id)) this.views.set(c.id, new CharacterView(this, c, c.id === m.playerId, showNames, this.style));
     }
     const seenP = new Set<number>();
     for (const p of m.pickups) {
@@ -520,13 +748,21 @@ export class GameScene extends Phaser.Scene {
   private render(dt: number): void {
     const m = this.model;
     const viewer = this.player;
+    const ms = m.modeNet();
     for (const c of m.chars) {
       let hidden = false;
-      if (c !== viewer && c.team !== viewer.team && c.inBush) {
+      // En Jamón Bomba no hay equipos: todos son "enemigos".
+      const enemy = c !== viewer && (m.mode === 'bomba' || c.team !== viewer.team) && viewer.alive;
+      if (enemy && c.inBush) {
         hidden = Math.hypot(c.x - viewer.x, c.y - viewer.y) > BALANCE.terrain.bushRevealDistance;
       }
-      this.views.get(c.id)?.update(dt, c, hidden, m.grid, this.fx);
+      const bi = c.bomb ? ms.b.indexOf(c.id) : -1;
+      const vc: ViewCtx = { viewer, urgency: bi >= 0 ? ms.b[bi + 1] : -1, bigHeads: this.bigHeads, enemy };
+      this.views.get(c.id)?.update(dt, c, hidden, m.grid, this.fx, vc);
+      // Infectados: rastro de partículas verdes.
+      if (m.mode === 'infeccion' && c.alive && c.team === 'chaser' && Math.random() < dt * 3 && this.near(c.x, c.y)) this.fx.infect(c.x, c.y - 6, 1);
     }
+    for (const pv of this.propViews) pv.update(dt);
     for (const p of m.pickups) this.pickupViews.get(p.iid)?.update(dt, p);
     for (const p of m.projectiles) this.projViews.get(p.pid)?.update(dt, p);
     // humo continuo de las bombas
@@ -574,11 +810,17 @@ export class GameScene extends Phaser.Scene {
     if (this.finished) return;
     const m = this.model;
     let data: ResultsData;
+    const me = this.player;
     if (m instanceof OnlineModel) {
       // Online, las estadísticas las manda el servidor al acabar.
       const r = m.results;
       if (!r) return;
+      const champ = r.entries.find((e) => e.id === r.champion);
       data = {
+        mode: m.mode,
+        champion: champ ? champ.name : null,
+        horse: r.horse,
+        myHorse: me.horse,
         mapId: m.mapId,
         role: this.player.team,
         winner: r.winner,
@@ -588,7 +830,12 @@ export class GameScene extends Phaser.Scene {
         entries: r.entries.map((e) => ({ name: e.name, team: e.team, isPlayer: e.id === m.playerId, alive: e.alive, stats: e.stats, look: e.look })),
       };
     } else {
+      const champ = m.chars.find((c) => c.id === m.champion);
       data = {
+        mode: m.mode,
+        champion: champ ? champ.name : null,
+        horse: (m as OfflineModel).sim.hype.horseWinner,
+        myHorse: me.horse,
         mapId: m.mapId,
         role: this.player.team,
         winner: m.winner ?? 'escapist',
@@ -601,7 +848,7 @@ export class GameScene extends Phaser.Scene {
     this.finished = true;
     this.scene.stop('UI');
     if (this.autotest) {
-      this.scene.restart({ mapId: m.mapId, role: this.data_.role });
+      this.scene.restart({ mode: m.mode, mapId: m.mapId, role: this.data_.role });
       return;
     }
     m.destroy();
@@ -623,6 +870,6 @@ export class GameScene extends Phaser.Scene {
   restartMatch(): void {
     if (this.model.online) return;
     this.scene.stop('UI');
-    this.scene.restart({ mapId: this.model.mapId, role: this.data_.role });
+    this.scene.restart({ mode: this.model.mode, mapId: this.model.mapId, role: this.data_.role, horse: this.data_.horse });
   }
 }

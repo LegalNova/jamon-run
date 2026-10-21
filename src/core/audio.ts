@@ -28,7 +28,27 @@ export type Sfx =
   | 'smoke'
   | 'warning'
   | 'spawn'
-  | 'denied';
+  | 'denied'
+  // modos y dopamina
+  | 'coin'
+  | 'combo'
+  | 'boom'
+  | 'fuse'
+  | 'pass'
+  | 'infect'
+  | 'hintWhistle'
+  | 'hintGiggle'
+  | 'hintOink'
+  | 'hintSqueak'
+  | 'miss'
+  | 'poof'
+  | 'spinTick'
+  | 'jackpot'
+  | 'gallop'
+  | 'fanfare'
+  | 'levelup'
+  | 'medal'
+  | 'alarm';
 
 type Track = 'menu' | 'game';
 
@@ -123,6 +143,12 @@ class AudioEngine {
   private nextTime = 0;
   private timer: number | null = null;
   private lastPlayed: Partial<Record<Sfx, number>> = {};
+  /** Multiplicador de tempo de la música (Infección: se acelera al quedar pocos). */
+  private tempo = 1;
+
+  setTempo(k: number): void {
+    this.tempo = Math.max(0.5, Math.min(2, k));
+  }
 
   constructor() {
     const unlock = () => this.unlock();
@@ -191,7 +217,7 @@ class AudioEngine {
     const ctx = this.ctx;
     if (!ctx || !this.currentTrack) return;
     const song = SONGS[this.currentTrack];
-    const stepDur = 60 / song.bpm / 4;
+    const stepDur = 60 / (song.bpm * this.tempo) / 4;
     // Si la pestaña estuvo dormida, no intentamos "recuperar" notas.
     if (this.nextTime < ctx.currentTime - 0.2) this.nextTime = ctx.currentTime + 0.05;
     while (this.nextTime < ctx.currentTime + 0.12) {
@@ -387,6 +413,73 @@ class AudioEngine {
         break;
       case 'spawn':
         this.tone(out, 'triangle', 700, t, 0.12, 0.12, 1400);
+        break;
+      case 'coin':
+        this.tone(out, 'square', noteFreq('B5'), t, 0.06, 0.08);
+        this.tone(out, 'square', noteFreq('E6'), t + 0.06, 0.16, 0.08);
+        break;
+      case 'combo':
+        this.arp(['E5', 'G#5', 'B5', 'E6'], t, 0.04, 'square', 0.09);
+        break;
+      case 'boom':
+        this.noiseBurst(out, t, 0.9, 0.7, 'lowpass', 2200, 60);
+        this.tone(out, 'sine', 120, t, 0.6, 0.6, 30);
+        break;
+      case 'fuse':
+        this.noiseBurst(out, t, 0.05, 0.12, 'bandpass', 3500);
+        break;
+      case 'pass':
+        this.tone(out, 'square', 520, t, 0.09, 0.1, 1040);
+        break;
+      case 'infect':
+        this.tone(out, 'sawtooth', 220, t, 0.35, 0.12, 90);
+        this.noiseBurst(out, t, 0.25, 0.15, 'bandpass', 900, 300);
+        break;
+      case 'hintWhistle':
+        this.tone(out, 'sine', 1200, t, 0.18, 0.18, 1800);
+        this.tone(out, 'sine', 1800, t + 0.2, 0.25, 0.18, 1100);
+        break;
+      case 'hintGiggle':
+        this.arp(['A5', 'G5', 'A5', 'G5', 'A5'], t, 0.06, 'triangle', 0.16);
+        break;
+      case 'hintOink':
+        this.tone(out, 'sawtooth', 300, t, 0.12, 0.14, 180);
+        this.tone(out, 'sawtooth', 320, t + 0.16, 0.14, 0.14, 170);
+        break;
+      case 'hintSqueak':
+        this.tone(out, 'square', 1500, t, 0.1, 0.08, 2600);
+        break;
+      case 'miss':
+        this.tone(out, 'square', 300, t, 0.08, 0.1, 150);
+        this.noiseBurst(out, t, 0.12, 0.2, 'lowpass', 900);
+        break;
+      case 'poof':
+        this.noiseBurst(out, t, 0.25, 0.25, 'highpass', 900, 3000);
+        break;
+      case 'spinTick':
+        this.tone(out, 'square', 1500, t, 0.02, 0.05);
+        break;
+      case 'jackpot':
+        this.arp(['C5', 'E5', 'G5', 'C6', 'E6', 'G6', 'C7'], t, 0.06, 'square', 0.12);
+        this.tone(out, 'triangle', noteFreq('C4'), t, 0.9, 0.25);
+        break;
+      case 'gallop':
+        this.noiseBurst(out, t, 0.04, 0.2, 'lowpass', 600);
+        this.noiseBurst(out, t + 0.09, 0.04, 0.16, 'lowpass', 500);
+        break;
+      case 'fanfare':
+        this.arp(['G4', 'C5', 'E5', 'G5', 'E5', 'G5', 'C6'], t, 0.09, 'square', 0.12);
+        this.tone(out, 'triangle', noteFreq('C3'), t, 0.8, 0.25);
+        break;
+      case 'levelup':
+        this.arp(['C5', 'D5', 'E5', 'G5', 'C6', 'D6', 'E6', 'G6'], t, 0.05, 'square', 0.11);
+        break;
+      case 'medal':
+        this.arp(['E5', 'B5', 'E6'], t, 0.08, 'triangle', 0.2);
+        break;
+      case 'alarm':
+        this.tone(out, 'square', 660, t, 0.15, 0.1, 990);
+        this.tone(out, 'square', 660, t + 0.2, 0.15, 0.1, 990);
         break;
     }
   }

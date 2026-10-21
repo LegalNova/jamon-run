@@ -36,7 +36,7 @@ export class OnlineScene extends Phaser.Scene {
     this.backdrop = new Backdrop(this, true);
     addFullscreenButton(this);
     text(this, VIEW_W / 2, 22, 'JUGAR ONLINE', { scale: 2, color: UI.focusLight });
-    text(this, VIEW_W / 2, 40, 'HASTA 20 JUGADORES · 1 AZUL POR CADA 3 ROJOS', { color: UI.muted });
+    text(this, VIEW_W / 2, 40, 'HASTA 20 JUGADORES · 4 MODOS · VOTAD EN LA SALA', { color: UI.muted });
     this.menu = new Menu();
     this.menu.add(new Button(this, VIEW_W / 2, 70, 'PARTIDA RÁPIDA', () => void this.quick(), 170, 18, UI.green));
     this.menu.add(new Button(this, VIEW_W / 2, 94, 'CREAR SALA PRIVADA', () => void this.create_(), 170, 18));

@@ -22,16 +22,24 @@
  *   C  Hércules de Ceuta (sólido)
  */
 
+/** Estilo visual de los tiles (cada mapa usa uno). */
 export type BiomeId = 'forest' | 'desert' | 'snow' | 'paris' | 'barcelona' | 'ceuta';
+/** Arenas pequeñas para Jamón Bomba. */
+export type ArenaId = 'plaza' | 'azotea' | 'patio';
+export type MapId = BiomeId | ArenaId;
 
 export interface MapDef {
-  id: BiomeId;
+  id: MapId;
   name: string;
   subtitle: string;
   description: string[];
   rows: string[];
   /** Mapas de ciudad (extras). */
   city?: boolean;
+  /** Arena pequeña (Jamón Bomba). */
+  arena?: boolean;
+  /** Estilo de los tiles (por defecto, el propio id). */
+  style?: BiomeId;
 }
 
 const wrap = (inner: string[]): string[] => {
@@ -260,8 +268,98 @@ export const MAPS: MapDef[] = [
       '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
     ]),
   },
+  {
+    id: 'plaza',
+    name: 'LA PLAZA',
+    subtitle: 'Fuente y carriles bici',
+    description: ['Plaza pequeña con fuente.', 'Ideal para Jamón Bomba:', 'no hay donde esconderse.'],
+    arena: true,
+    style: 'barcelona',
+    rows: wrap([
+      'T............................T',
+      '..o..........k...........o....',
+      '...gg........k........gg......',
+      '.............kXX..............',
+      '....T...T....k....T...T.......',
+      '..b..........k.............b..',
+      '.........c...k...c............',
+      'kkkkkkkkkkk~~~~~~kkkkkkkkkkkkk',
+      '...........~~~~~~.............',
+      '.....o.....~~~~~~.......o.....',
+      'kkkkkkkkkkk~~~~~~kkkkkkkkkkkkk',
+      '.........c...k...c............',
+      '..b..........k.............b..',
+      '....T...T....k....T...T.......',
+      '.............k................',
+      '...gg........k........gg......',
+      '..o..........k...........o....',
+      'T............................T',
+    ]),
+  },
+  {
+    id: 'azotea',
+    name: 'LA AZOTEA',
+    subtitle: 'Tejados de París',
+    description: ['Chimeneas, terrazas y', 'un jardín en el centro.', 'Arena de Jamón Bomba.'],
+    arena: true,
+    style: 'paris',
+    rows: wrap([
+      '..............................',
+      '.o..##.......r.......##....o..',
+      '....##...............##.......',
+      '..........cc....cc............',
+      '..rr.......................rr.',
+      '.......##.........##..........',
+      '.......##....o....##..........',
+      '.............XX...............',
+      '.c...r....bbbbbbbb....r....c..',
+      '.c...r....bbbbbbbb....r....c..',
+      '..............................',
+      '.......##.........##..........',
+      '.......##....o....##..........',
+      '..rr........................rr',
+      '..........cc....cc............',
+      '....##...............##.......',
+      '.o..##.......r.......##....o..',
+      '..............................',
+    ]),
+  },
+  {
+    id: 'patio',
+    name: 'EL PATIO',
+    subtitle: 'Patio andaluz con fuente',
+    description: ['Paredes encaladas,', 'macetas y una fuente.', 'Arena de Jamón Bomba.'],
+    arena: true,
+    style: 'ceuta',
+    rows: wrap([
+      'WWW.......................WWW.',
+      'W....b.....b.....b.....b....W.',
+      'W.o........................oW.',
+      '...WW....WW.......WW....WW....',
+      '.............XX...............',
+      '.b......b.............b.....b.',
+      '........r....~~~~....r........',
+      '.....o.......~~~~.......o.....',
+      '........r....~~~~....r........',
+      '.b......b.............b.....b.',
+      '..............................',
+      '...WW....WW.......WW....WW....',
+      'W.o........................oW.',
+      'W....b.....b.....b.....b....W.',
+      'WWW.......................WWW.',
+      '..............................',
+      '....b....b....b....b....b.....',
+      '..............................',
+    ]),
+  },
 ];
 
-export function getMap(id: BiomeId): MapDef {
+export function getMap(id: MapId): MapDef {
   return MAPS.find((m) => m.id === id) ?? MAPS[0];
+}
+
+/** Estilo de tiles de un mapa. */
+export function styleOf(id: MapId): BiomeId {
+  const m = getMap(id);
+  return m.style ?? (m.id as BiomeId);
 }

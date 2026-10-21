@@ -4,13 +4,18 @@
  */
 import type { Difficulty } from './balance';
 import type { Look } from './look';
-import type { BiomeId } from './maps';
+import type { MapId } from './maps';
 import type { MapScale } from './mapScale';
+import type { ModeNet } from './modes/types';
 import type { SimChar } from './sim/Char';
-import type { MatchState, PickupType, SimEvent, Stats, Team } from './sim/types';
+import type { MatchState, ModeId, PickupType, SimEvent, Stats, Team } from './sim/types';
 
 export interface RoomSettings {
-  mapId: BiomeId;
+  /** Modo elegido por el anfitrión, o 'voto' (gana el más votado en el lobby). */
+  mode: ModeId | 'voto';
+  /** Cazadores al empezar (buscadores / infectados / azules); 0 = automático. */
+  hunters: number;
+  mapId: MapId;
   duration: number;
   /** Rellenar con bots hasta este número de personajes (0 = sin bots). */
   botFill: number;
@@ -26,6 +31,9 @@ export interface LobbyPlayer {
   ready: boolean;
   host: boolean;
   connected: boolean;
+  /** Voto de modo y caballo de la carrera (-1 = sin elegir). */
+  vote: ModeId | null;
+  horse: number;
 }
 
 export type RoomPhase = 'lobby' | 'reveal' | 'playing' | 'results';
@@ -36,6 +44,7 @@ export interface RosterNet {
   team: Team;
   look: Look;
   human: boolean;
+  horse?: number;
 }
 
 export interface ResultNet {
@@ -54,9 +63,9 @@ export type ServerMsg =
   | { t: 'welcome'; you: number; code: string }
   | { t: 'full' }
   | { t: 'lobby'; code: string; phase: RoomPhase; players: LobbyPlayer[]; settings: RoomSettings; you: number }
-  | { t: 'start'; mapId: BiomeId; scale: MapScale; duration: number; difficulty: Difficulty; roster: RosterNet[]; you: number; revealMs: number }
+  | { t: 'start'; mode: ModeId; seed: number; mapId: MapId; scale: MapScale; duration: number; difficulty: Difficulty; roster: RosterNet[]; you: number; revealMs: number }
   | { t: 's'; s: SnapshotNet; m?: MeNet }
-  | { t: 'results'; winner: Team; timePlayed: number; duration: number; mapId: BiomeId; entries: ResultNet[] }
+  | { t: 'results'; mode: ModeId; winner: Team; champion: number; horse: number; timePlayed: number; duration: number; mapId: MapId; entries: ResultNet[] }
   | { t: 'pong'; c: number; ts: number }
   | { t: 'error'; msg: string };
 
@@ -70,6 +79,8 @@ export interface MeNet {
   en: number;
   bt: number;
   el: number;
+  /** Tiradas personales de ruleta que te quedan. */
+  sp: number;
 }
 
 export interface SnapshotNet {
@@ -81,7 +92,7 @@ export interface SnapshotNet {
   /** Tiempo restante y de partida en décimas. */
   tl: number;
   mt: number;
-  /** Personajes: [id, x*10, y*10, vx, vy, fx*100, fy*100, hp, energía, flags, atrapado*10, rescate*100]. */
+  /** Personajes: [id, x*10, y*10, vx, vy, fx*100, fy*100, hp, energía, flags, atrapado*10, rescate*100, equipo, disfraz, giro, flags2]. */
   c: number[][];
   /** Objetos: [iid, tipo, x, y, vida]. */
   p: number[][];
@@ -91,6 +102,8 @@ export interface SnapshotNet {
   k: number[][];
   /** Viento (levante) en décimas de px/s. */
   w: [number, number];
+  /** Estado del modo (fase, rondas, jamones bomba, efecto de la ruleta...). */
+  ms: ModeNet;
   e: SimEvent[];
 }
 
@@ -102,8 +115,10 @@ export type ClientMsg =
   | { t: 'ready'; v: boolean }
   | { t: 'settings'; s: Partial<RoomSettings> }
   | { t: 'start' }
-  /** Entrada: dirección (-100..100), sprint, contadores de pulsaciones. */
-  | { t: 'in'; x: number; y: number; r: number; a: number; b: number }
+  /** Entrada: dirección (-100..100), sprint, contadores de pulsaciones (acción, especial, girar, ruleta). */
+  | { t: 'in'; x: number; y: number; r: number; a: number; b: number; o?: number; q?: number }
+  | { t: 'vote'; m: ModeId }
+  | { t: 'horse'; h: number }
   | { t: 'say'; p: number }
   | { t: 'ping'; c: number }
   | { t: 'leave' };
@@ -111,7 +126,7 @@ export type ClientMsg =
 // ------------------------------------------------------------------ codificación
 
 export const STATES: MatchState[] = ['countdown', 'play', 'ended'];
-export const PICKUPS: PickupType[] = ['medkit', 'boot', 'shield', 'gold'];
+export const PICKUPS: PickupType[] = ['medkit', 'boot', 'shield', 'gold', 'barrier', 'grenade', 'coin'];
 
 export const F = {
   alive: 1,
@@ -127,6 +142,16 @@ export const F = {
   trapped: 1024,
 } as const;
 
+/** Segundo bloque de flags (modos y ruleta). */
+export const F2 = {
+  bomb: 1,
+  anchored: 2,
+  invisible: 4,
+  barrier: 8,
+  grenade: 16,
+  dashFree: 32,
+} as const;
+
 export function encodeChar(c: SimChar): number[] {
   let f = 0;
   if (c.alive) f |= F.alive;
@@ -140,6 +165,13 @@ export function encodeChar(c: SimChar): number[] {
   if (c.hamHidden > 0) f |= F.hamHidden;
   if (c.human) f |= F.human;
   if (c.trapped > 0) f |= F.trapped;
+  let f2 = 0;
+  if (c.bomb) f2 |= F2.bomb;
+  if (c.anchored) f2 |= F2.anchored;
+  if (c.invisible > 0) f2 |= F2.invisible;
+  if (c.heldItem === 'barrier') f2 |= F2.barrier;
+  if (c.heldItem === 'grenade') f2 |= F2.grenade;
+  if (c.dashFree > 0) f2 |= F2.dashFree;
   return [
     c.id,
     Math.round(c.x * 10),
@@ -153,6 +185,10 @@ export function encodeChar(c: SimChar): number[] {
     f,
     Math.round(Math.max(0, c.trapped) * 10),
     Math.round(c.rescueProg * 100),
+    c.team === 'chaser' ? 1 : 0,
+    c.disguise,
+    c.rot,
+    f2,
   ];
 }
 

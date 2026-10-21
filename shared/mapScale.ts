@@ -1,6 +1,6 @@
 import { MAP_SCALE } from './balance';
 import { Grid } from './grid';
-import { BiomeId, getMap } from './maps';
+import { getMap, MapId } from './maps';
 
 export interface MapScale {
   sx: number;
@@ -8,7 +8,9 @@ export interface MapScale {
 }
 
 /** Tamaño del mapa según el número total de personajes (jugadores + bots). */
-export function scaleFor(players: number): MapScale {
+export function scaleFor(players: number, mapId?: MapId): MapScale {
+  // Las arenas son pequeñas a propósito: como mucho se duplican a lo ancho.
+  if (mapId && getMap(mapId).arena) return players > 12 ? { sx: 2, sy: 1 } : { sx: 1, sy: 1 };
   const s = MAP_SCALE.find((m) => players <= m.maxPlayers) ?? MAP_SCALE[MAP_SCALE.length - 1];
   return { sx: s.sx, sy: s.sy };
 }
@@ -30,7 +32,7 @@ const cache = new Map<string, string[]>();
  * y se elige el lado de la costura que deja el mapa conectado (p. ej. no unir
  * por el mar en Barcelona).
  */
-export function buildRows(mapId: BiomeId, scale: MapScale): string[] {
+export function buildRows(mapId: MapId, scale: MapScale): string[] {
   const key = `${mapId}:${scale.sx}x${scale.sy}`;
   const hit = cache.get(key);
   if (hit) return hit;

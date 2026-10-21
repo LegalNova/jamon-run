@@ -44,6 +44,8 @@ const CHAR_TERRAIN: Record<string, Terrain> = {
   C: Terrain.Solid,
   M: Terrain.Metro,
   k: Terrain.Lane,
+  /** Barrera temporal (Infección). */
+  B: Terrain.Solid,
 };
 
 const MOVE_COST: Record<number, number> = {
@@ -60,7 +62,7 @@ const MOVE_COST: Record<number, number> = {
 /** Tiles que tapan la vista (los arbustos, el agua y las terrazas no). */
 export const SIGHT_BLOCKERS = '#TRHnLPSWC';
 /** Tiles que paran un jamón lanzado. */
-export const SHOT_BLOCKERS = '#TRHnrLPSWCcg';
+export const SHOT_BLOCKERS = '#TRHnrLPSWCcgB';
 
 const DIRS = [
   [1, 0, 1],
@@ -165,6 +167,33 @@ export class Grid {
         for (let dx = -2; dx <= 2; dx++) if (this.walkable(x + dx, y + dy)) n++;
       this.openness[i] = n / 25;
     }
+  }
+
+  private saved = new Map<number, { c: string; t: number }>();
+
+  /** Pone o quita una barrera temporal en unos tiles (devuelve los que ha cambiado). */
+  setBarrier(tiles: number[], on: boolean): number[] {
+    const done: number[] = [];
+    for (const i of tiles) {
+      const x = i % this.w;
+      const y = (i / this.w) | 0;
+      if (!this.inBounds(x, y)) continue;
+      if (on) {
+        if (this.saved.has(i) || !this.walkableIdx(i)) continue;
+        this.saved.set(i, { c: this.chars[y][x], t: this.terrain[i] });
+        this.chars[y][x] = 'B';
+        this.terrain[i] = Terrain.Solid;
+        done.push(i);
+      } else {
+        const s = this.saved.get(i);
+        if (!s) continue;
+        this.saved.delete(i);
+        this.chars[y][x] = s.c;
+        this.terrain[i] = s.t;
+        done.push(i);
+      }
+    }
+    return done;
   }
 
   private walkableT(t: number): boolean {

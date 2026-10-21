@@ -1,13 +1,24 @@
-import { AIParams, BALANCE, RESCUE, TILE } from '../balance';
+import { AIParams, BALANCE, MODES, RESCUE, TILE } from '../balance';
 import { DistField, Grid, Terrain } from '../grid';
-import type { BiomeId } from '../maps';
+import type { MapId } from '../maps';
+import type { Prop } from '../props';
+import { wrapAngle } from './Char';
 import type { SimChar } from './Char';
-import type { Intent, PickupType } from './types';
+import type { Intent, ModeId, PickupType } from './types';
 
 /** Lo que la IA necesita del mundo. */
 export interface BotWorld {
   grid: Grid;
-  mapId: BiomeId;
+  mapId: MapId;
+  mode: ModeId;
+  /** Fase del modo (Escondite: 0 = esconderse). */
+  phase: number;
+  props: Prop[];
+  /** Pistas sonoras recientes (Escondite). */
+  hints: { x: number; y: number; t: number }[];
+  /** ¿Persigue (cazador) o huye? Depende del modo. */
+  isHunter(c: SimChar): boolean;
+  canPickup(c: SimChar, type: PickupType): boolean;
   ai: AIParams;
   matchTime: number;
   chars: SimChar[];
@@ -18,7 +29,7 @@ export interface BotWorld {
   canSee(viewer: SimChar, target: SimChar): boolean;
 }
 
-type Mode = 'chase' | 'search' | 'flee' | 'item' | 'wander' | 'hide' | 'rescue';
+type Mode = 'chase' | 'search' | 'flee' | 'item' | 'wander' | 'hide' | 'rescue' | 'probe';
 
 const rand = Math.random;
 
@@ -46,6 +57,12 @@ export class BotBrain {
   private wanderTimer = 0;
   private lastSeen = new Map<number, { x: number; y: number; t: number }>();
   private rescueTarget: SimChar | null = null;
+  /** Escondite: objeto/sospechoso al que va a golpear, y los ya comprobados. */
+  private probe: { x: number; y: number; char: SimChar | null } | null = null;
+  private checked = new Set<string>();
+  private doneHints = new Set<object>();
+  private hideSpot: { x: number; y: number } | null = null;
+  private hideState: 'go' | 'hidden' | 'flee' = 'go';
 
   constructor(private ch: SimChar, private w: BotWorld) {
     this.decideTimer = rand() * 0.3;
@@ -58,15 +75,260 @@ export class BotBrain {
     this.decideTimer -= dt;
     this.repathTimer -= dt;
     this.wanderTimer -= dt;
+    if (this.w.mode === 'escondite') {
+      if (this.ch.isChaser) this.seeker(dt, it);
+      else this.hider(dt, it);
+      this.checkStuck(dt, it);
+      return;
+    }
+    const hunter = this.w.isHunter(this.ch);
     if (this.decideTimer <= 0) {
       const r = this.w.ai.reaction;
       this.decideTimer = r * (0.75 + rand() * 0.5);
-      if (this.ch.isChaser) this.decideChaser();
+      if (hunter) this.decideChaser();
       else this.decideEscapist();
     }
-    if (this.ch.isChaser) this.steerChaser(dt, it);
+    if (hunter) this.steerChaser(dt, it);
     else this.steerEscapist(dt, it);
     this.checkStuck(dt, it);
+  }
+
+  // ================================================================== ESCONDITE
+
+  private hider(dt: number, it: Intent): void {
+    const me = this.ch;
+    const w = this.w;
+    let nd = Infinity;
+    let nearest: SimChar | null = null;
+    for (const c of w.chars) {
+      if (!c.alive || !c.isChaser) continue;
+      const d = Math.hypot(c.x - me.x, c.y - me.y);
+      if (d < nd) {
+        nd = d;
+        nearest = c;
+      }
+    }
+    // Descubierto (le han golpeado) o un buscador a punto de darle: huye.
+    if (this.hideState !== 'flee' && me.disguise < 0 && w.phase === 1 && nd < 70) this.hideState = 'flee';
+    if (this.hideState === 'hidden' && nearest && nd < 22 && nearest.windup > 0 && rand() < 0.5 * dt * 10) this.hideState = 'flee';
+    if (this.hideState === 'flee') {
+      if (nd > 130 && me.specialCd <= 0) {
+        this.hideState = 'go';
+        this.hideSpot = null;
+      } else {
+        if (this.decideTimer <= 0) {
+          this.decideTimer = w.ai.reaction;
+          this.decideEscapist();
+        }
+        this.steerEscapist(dt, it);
+        return;
+      }
+    }
+    if (this.hideState === 'hidden') {
+      // Quieto como una estatua (anclado con SHIFT).
+      it.sprint = true;
+      if (me.disguise < 0) this.hideState = 'go';
+      // Tras hacer ruido, a veces se cambia de sitio si hay un buscador cerca (arriesgado: se ve moverse).
+      const myHint = w.hints.find((h) => Math.abs(h.x - me.x) < 2 && Math.abs(h.y - me.y) < 2 && w.matchTime - h.t < 0.5);
+      if (myHint && nd < 200 && rand() < 0.4) {
+        this.hideState = 'go';
+        this.hideSpot = null;
+      }
+      return;
+    }
+    // Buscar un sitio junto a objetos parecidos.
+    if (!this.hideSpot) {
+      const g = w.grid;
+      let best: { x: number; y: number } | null = null;
+      let bs = -Infinity;
+      for (let k = 0; k < 24 && w.props.length; k++) {
+        const p = w.props[Math.floor(rand() * w.props.length)];
+        const d = Math.hypot(p.x - me.x, p.y - me.y);
+        if (d > 22 * TILE) continue;
+        let s = -d * 0.05 + rand() * 6;
+        if (nearest) s += Math.min(nd, Math.hypot(p.x - nearest.x, p.y - nearest.y)) * 0.03;
+        if (s > bs) {
+          bs = s;
+          // Al lado del objeto (en un hueco libre), como si fueran dos iguales.
+          const ang = rand() * Math.PI * 2;
+          const x = p.x + Math.cos(ang) * 14;
+          const y = p.y + Math.sin(ang) * 10;
+          if (!g.walkable(Math.floor(x / TILE), Math.floor(y / TILE))) continue;
+          best = { x, y };
+        }
+      }
+      this.hideSpot = best ?? { x: me.x, y: me.y };
+      const t = w.grid.tileOf(this.hideSpot.x, this.hideSpot.y);
+      this.setGoal(t, this.hideSpot.x, this.hideSpot.y, true);
+    }
+    const dx = this.hideSpot.x - me.x;
+    const dy = this.hideSpot.y - me.y;
+    if (Math.hypot(dx, dy) < 5) {
+      if (me.disguise < 0 || rand() < 0.02) it.special = true;
+      else this.hideState = 'hidden';
+      return;
+    }
+    const p = this.followPath();
+    const l = Math.hypot(p.x, p.y);
+    if (l > 0.01) {
+      it.mx = p.x / l;
+      it.my = p.y / l;
+    } else {
+      it.mx = dx / Math.hypot(dx, dy);
+      it.my = dy / Math.hypot(dx, dy);
+    }
+    // Disfrazarse por el camino si hay buscadores cerca.
+    if (w.phase === 1 && me.disguise < 0 && nd < 160 && me.specialCd <= 0) it.special = true;
+  }
+
+  private seeker(dt: number, it: Intent): void {
+    const me = this.ch;
+    const w = this.w;
+    if (w.phase === 0) return;
+    // ¿Algún escondido a la vista (sin disfraz)? Persecución normal.
+    const visible = w.chars.some((e) => e.alive && !e.isChaser && e.disguise < 0 && w.canSee(me, e) && Math.hypot(e.x - me.x, e.y - me.y) < 200);
+    if (visible) {
+      this.probe = null;
+      if (this.decideTimer <= 0) {
+        this.decideTimer = w.ai.reaction;
+        this.decideChaser();
+      }
+      this.steerChaser(dt, it);
+      return;
+    }
+    if (this.decideTimer <= 0 || !this.probe) {
+      this.decideTimer = w.ai.reaction * 1.5;
+      this.pickProbe();
+    }
+    const pr = this.probe;
+    if (!pr) return;
+    const tx = pr.char ? pr.char.x : pr.x;
+    const ty = pr.char ? pr.char.y : pr.y;
+    const d = Math.hypot(tx - me.x, ty - me.y);
+    const C = BALANCE.chaser;
+    if (d < C.attackRange - 3) {
+      it.aimX = tx - me.x;
+      it.aimY = ty - me.y;
+      const ang = Math.abs(wrapAngle(Math.atan2(it.aimY, it.aimX) - Math.atan2(me.fy, me.fx)));
+      if (me.attackCd <= 0 && me.swing <= 0 && ang < 0.6) {
+        it.action = true;
+        this.checked.add(`${Math.round(tx / 4)},${Math.round(ty / 4)}`);
+        this.probe = null;
+        this.decideTimer = 0.35;
+      } else {
+        it.mx = (tx - me.x) / Math.max(d, 1) * 0.3;
+        it.my = (ty - me.y) / Math.max(d, 1) * 0.3;
+      }
+      return;
+    }
+    if (d < 40 && w.grid.clearPath(me.x, me.y, tx, ty, me.radius)) {
+      it.mx = (tx - me.x) / d;
+      it.my = (ty - me.y) / d;
+      return;
+    }
+    const p = this.followPath();
+    const l = Math.hypot(p.x, p.y);
+    if (l > 0.01) {
+      it.mx = p.x / l;
+      it.my = p.y / l;
+    }
+  }
+
+  /** Elige el siguiente objeto sospechoso: real o disfrazado, sin saber cuál es cuál. */
+  private pickProbe(): void {
+    const me = this.ch;
+    const w = this.w;
+    const now = w.matchTime;
+    // ¿Ha sonado una pista cerca? Va directo a lo que haya justo donde sonó.
+    let hint: { x: number; y: number; t: number } | null = null;
+    let hd = Infinity;
+    for (const h of w.hints) {
+      if (now - h.t > 12 || this.doneHints.has(h)) continue;
+      const d = Math.hypot(h.x - me.x, h.y - me.y);
+      if (d < 24 * TILE && d < hd) {
+        hd = d;
+        hint = h;
+      }
+    }
+    if (hint) {
+      let bestH: { x: number; y: number; char: SimChar | null } | null = null;
+      let bh = 40;
+      const near = (x: number, y: number, char: SimChar | null) => {
+        if (this.checked.has(`${Math.round(x / 4)},${Math.round(y / 4)}`)) return;
+        const d = Math.hypot(x - hint!.x, y - hint!.y);
+        if (d < bh) {
+          bh = d;
+          bestH = { x, y, char };
+        }
+      };
+      for (const p of w.props) near(p.x, p.y, null);
+      for (const c of w.chars) if (c.alive && !c.isChaser && c.disguise >= 0) near(c.x, c.y, c);
+      if (bestH) {
+        const b = bestH as { x: number; y: number; char: SimChar | null };
+        this.mode = 'probe';
+        this.probe = b;
+        this.setGoal(w.grid.nearestWalkable(b.x, b.y), b.x, b.y);
+        return;
+      }
+      this.doneHints.add(hint);
+    }
+    const hp = me.hp / MODES.escondite.seekerHp;
+    let best: { x: number; y: number; char: SimChar | null } | null = null;
+    let bs = Infinity;
+    const consider = (x: number, y: number, char: SimChar | null) => {
+      if (this.checked.has(`${Math.round(x / 4)},${Math.round(y / 4)}`)) return;
+      const d = Math.hypot(x - me.x, y - me.y);
+      if (d > 26 * TILE) return;
+      let s = d + rand() * 60;
+      // Las pistas sonoras: lo más cerca del ruido es lo más sospechoso.
+      for (const h of w.hints) {
+        if (now - h.t > 12 || Math.hypot(h.x - me.x, h.y - me.y) > 22 * TILE) continue;
+        const dh = Math.hypot(h.x - x, h.y - y);
+        if (dh < 40) s -= 260 - dh * 3;
+      }
+      let cue = false;
+      // Un objeto que se mueve es muy sospechoso.
+      if (char && char.speedNow > 8 && d < 170) {
+        s -= 260;
+        cue = true;
+      }
+      // Dos objetos iguales pegados: uno puede ser un disfrazado.
+      const k = char ? char.disguise : kindAt.get(`${x},${y}`);
+      for (const o of all) {
+        if (o.x === x && o.y === y) continue;
+        if (o.k === k && Math.abs(o.x - x) < 24 && Math.abs(o.y - y) < 24) {
+          s -= 110;
+          cue = true;
+          break;
+        }
+      }
+      // Sin pistas, golpear a lo loco duele: solo con vida de sobra y no muy lejos.
+      if (!cue && (hp < 0.6 || d > 12 * TILE)) return;
+      if (s < bs) {
+        bs = s;
+        best = { x, y, char };
+      }
+    };
+    const all: { x: number; y: number; k: number }[] = [];
+    const kindAt = new Map<string, number>();
+    for (const p of w.props) {
+      all.push({ x: p.x, y: p.y, k: p.k });
+      kindAt.set(`${p.x},${p.y}`, p.k);
+    }
+    for (const c of w.chars) if (c.alive && !c.isChaser && c.disguise >= 0) all.push({ x: c.x, y: c.y, k: c.disguise });
+    for (const p of w.props) consider(p.x, p.y, null);
+    for (const c of w.chars) if (c.alive && !c.isChaser && c.disguise >= 0) consider(c.x, c.y, c);
+    if (!best) {
+      // Todo comprobado: vuelve a empezar.
+      this.checked.clear();
+      this.mode = 'search';
+      this.pickSearchGoal();
+      return;
+    }
+    this.mode = 'probe';
+    this.probe = best;
+    const b = best as { x: number; y: number };
+    this.setGoal(w.grid.nearestWalkable(b.x, b.y), b.x, b.y);
   }
 
   // ================================================================== PERSEGUIDOR
@@ -80,8 +342,10 @@ export class BotBrain {
     let bestScore = Infinity;
     let bestPos = { x: 0, y: 0 };
     let bestVisible = false;
+    const bomba = w.mode === 'bomba';
     for (const e of w.chars) {
-      if (!e.free || e.isChaser) continue;
+      if (!e.free || w.isHunter(e) || e === me) continue;
+      if (bomba && e.id === me.lastFrom && me.passCd > 0) continue;
       const visible = w.canSee(me, e);
       if (visible) this.lastSeen.set(e.id, { x: e.x, y: e.y, t: now });
       const seen = this.lastSeen.get(e.id);
@@ -93,7 +357,7 @@ export class BotBrain {
       if (!w.grid.lineOfSight(me.x, me.y, pos.x, pos.y)) s += 35;
       // coordinación: penaliza objetivos ya perseguidos por otro más cerca
       for (const o of w.chars) {
-        if (o === me || !o.isChaser || o.targetId !== e.id) continue;
+        if (o === me || !w.isHunter(o) || o.targetId !== e.id) continue;
         if (Math.hypot(o.x - e.x, o.y - e.y) < d) s += 75;
       }
       if (this.target === e) s -= 25; // algo de constancia
@@ -118,7 +382,7 @@ export class BotBrain {
     // ¿Hay otro perseguidor más cerca del mismo objetivo? Entonces intento cortarle el paso.
     let flank = false;
     for (const o of w.chars) {
-      if (o !== me && o.isChaser && o.targetId === best.id && Math.hypot(o.x - best.x, o.y - best.y) < d) flank = true;
+      if (o !== me && w.isHunter(o) && o.targetId === best.id && Math.hypot(o.x - best.x, o.y - best.y) < d) flank = true;
     }
     const tLead = bestVisible ? ai.lead * Math.min(1.2, d / 90) + (flank ? 0.7 : 0) : 0;
     const gx = bestPos.x + best.vx * tLead;
@@ -130,6 +394,7 @@ export class BotBrain {
     // ¿Lanzar jamón?
     const C = BALANCE.chaser;
     if (
+      w.mode === 'pilla' &&
       bestVisible &&
       me.specialCd <= 0 &&
       d > 42 &&
@@ -196,13 +461,14 @@ export class BotBrain {
         dirX = t.x + t.vx * lead - me.x;
         dirY = t.y + t.vy * lead - me.y;
       }
-      // golpe
-      if (visible && dist < C.attackRange + t.radius - 2) {
+      // golpe (o abalanzarse, en Infección y Bomba)
+      const reach = w.mode === 'pilla' || w.mode === 'escondite' ? C.attackRange + t.radius - 2 : 26;
+      if (visible && dist < reach) {
         it.aimX = t.x - me.x;
         it.aimY = t.y - me.y;
         if (this.attackTimer < 0) this.attackTimer = w.ai.attackDelay * (0.6 + rand() * 0.8);
         this.attackTimer -= dt;
-        if (this.attackTimer <= 0 && me.attackCd <= 0) {
+        if (this.attackTimer <= 0 && (w.mode === 'pilla' || w.mode === 'escondite' ? me.attackCd <= 0 : me.dashCd <= 0 && rand() < 0.5)) {
           it.action = true;
           this.attackTimer = -1;
         }
@@ -247,7 +513,7 @@ export class BotBrain {
     let nearest: SimChar | null = null;
     let nd = Infinity;
     for (const c of w.chars) {
-      if (!c.alive || !c.isChaser) continue;
+      if (!c.alive || !w.isHunter(c) || c === me) continue;
       const d = Math.hypot(c.x - me.x, c.y - me.y);
       if (d < nd) {
         nd = d;
@@ -297,7 +563,8 @@ export class BotBrain {
         this.goalX = c.x;
         this.goalY = c.y;
       }
-      if (me.specialCd <= 0 && nd < 34 && (me.hp <= 50 || rand() < 0.3) && rand() < ai.dashChance * 0.7) this.wantSmoke = true;
+      if (w.mode === 'pilla' && me.specialCd <= 0 && nd < 34 && (me.hp <= 50 || rand() < 0.3) && rand() < ai.dashChance * 0.7) this.wantSmoke = true;
+      if (w.mode === 'infeccion' && me.heldItem && nd < 46 && rand() < ai.dashChance) this.wantSmoke = true;
       return;
     }
 
@@ -307,8 +574,7 @@ export class BotBrain {
     let bestItemScore = Infinity;
     for (const p of w.pickups) {
       if (p.dead) continue;
-      if (p.type === 'medkit' && me.hp >= me.maxHp) continue;
-      if (p.type === 'shield' && me.shield) continue;
+      if (p.type !== 'coin' && !w.canPickup(me, p.type)) continue;
       if (p.type === 'gold' && !anyTrapped) continue;
       const pt = g.tileOf(p.x, p.y);
       const myD = Math.hypot(p.x - me.x, p.y - me.y);
@@ -368,7 +634,7 @@ export class BotBrain {
     let nearest: SimChar | null = null;
     let nd = Infinity;
     for (const c of w.chars) {
-      if (!c.alive || !c.isChaser) continue;
+      if (!c.alive || !w.isHunter(c) || c === me) continue;
       const d = Math.hypot(c.x - me.x, c.y - me.y);
       if (d < nd) {
         nd = d;
@@ -449,7 +715,7 @@ export class BotBrain {
       if (d / (BALANCE.escapist.speed * 0.9) + RESCUE.rescueTime > t.trapped + 0.3) continue;
       // el azul más cercano al atrapado no debe estar mucho más cerca que yo
       let guard = Infinity;
-      for (const c of w.chars) if (c.isChaser && c.alive) guard = Math.min(guard, Math.hypot(c.x - t.x, c.y - t.y));
+      for (const c of w.chars) if (w.isHunter(c) && c.alive) guard = Math.min(guard, Math.hypot(c.x - t.x, c.y - t.y));
       if (guard < 26 && d > 30) continue;
       if (guard < d * 0.6) continue;
       if (d < bestD) {

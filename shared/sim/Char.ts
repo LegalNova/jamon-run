@@ -2,7 +2,8 @@ import { BALANCE, CITY, RESCUE } from '../balance';
 import { clampToMap, moveCircle } from '../collision';
 import { Terrain } from '../grid';
 import type { Look } from '../look';
-import { emptyIntent, emptyStats, Intent, SimCtx, Stats, Team } from './types';
+import { canSprintFor } from '../modes/rules';
+import { Ability, emptyIntent, emptyStats, Intent, PickupType, SimCtx, Stats, Team } from './types';
 
 const B = BALANCE;
 export const SWING_TIME = 0.24;
@@ -23,7 +24,8 @@ export function wrapAngle(a: number): number {
  */
 export class SimChar {
   readonly id: number;
-  readonly team: Team;
+  /** Equipo (cambia en Infección cuando te contagian). */
+  team: Team;
   name: string;
   look: Look;
   /** Controlado por una persona (si no, por un bot). */
@@ -40,7 +42,7 @@ export class SimChar {
   fy = 1;
 
   hp: number;
-  readonly maxHp: number;
+  maxHp: number;
   energy: number;
   readonly energyMax: number;
   exhaustTimer = 0;
@@ -74,6 +76,22 @@ export class SimChar {
   /** Quién lo atrapó (para las estadísticas). */
   trappedBy = -1;
   metroCd = 0;
+  /** Escondite: objeto en el que está transformado (-1 = ninguno), giro 0..3 y si está anclado. */
+  disguise = -1;
+  rot = 0;
+  anchored = false;
+  /** Infección: objeto guardado para usar con E. */
+  heldItem: PickupType | null = null;
+  /** Jamón Bomba: lleva el jamón, de quién lo recibió y hasta cuándo no se lo puede devolver. */
+  bomb = false;
+  lastFrom = -1;
+  passCd = 0;
+  /** Premios de la ruleta. */
+  invisible = 0;
+  dashFree = 0;
+  /** Tiradas personales de la ruleta que le quedan y caballo al que apostó. */
+  spinsLeft = 0;
+  horse = 0;
 
   stats: Stats = emptyStats();
   deathTime = -1;
@@ -116,15 +134,22 @@ export class SimChar {
   }
 
   /** Cooldown de la habilidad principal (golpe o dash) normalizado 0..1 (1 = listo). */
-  get actionReady(): number {
-    const max = this.isChaser ? B.chaser.attackCooldown : B.escapist.dashCooldown;
-    const cd = this.isChaser ? this.attackCd : this.dashCd;
-    return 1 - Math.max(0, cd) / max;
+  actionReady(ability: Ability = this.isChaser ? 'attack' : 'dash'): number {
+    if (ability === 'attack') return 1 - Math.max(0, this.attackCd) / B.chaser.attackCooldown;
+    if (ability === 'dash') return 1 - Math.max(0, this.dashCd) / B.escapist.dashCooldown;
+    return 1;
   }
 
-  get specialReady(): number {
-    const max = this.isChaser ? B.chaser.throwCooldown : B.escapist.smokeCooldown;
-    return 1 - Math.max(0, this.specialCd) / max;
+  specialReady(ability: Ability = this.isChaser ? 'throw' : 'smoke'): number {
+    if (ability === 'throw') return 1 - Math.max(0, this.specialCd) / B.chaser.throwCooldown;
+    if (ability === 'smoke') return 1 - Math.max(0, this.specialCd) / B.escapist.smokeCooldown;
+    if (ability === 'item') return this.heldItem ? 1 : 0;
+    return 1;
+  }
+
+  /** ¿Usa el perfil de velocidad del perseguidor (más lento, impulso en recta)? */
+  private chaserStats(ctx: SimCtx): boolean {
+    return this.team === 'chaser' && (ctx.mode === 'pilla' || ctx.mode === 'escondite');
   }
 
   // ------------------------------------------------------------------ bucle
@@ -143,6 +168,10 @@ export class SimChar {
     // temporizadores
     this.attackCd -= dt;
     this.dashCd -= dt;
+    this.passCd -= dt;
+    this.invisible -= dt;
+    this.dashFree -= dt;
+    if (this.dashFree > 0) this.dashCd = Math.min(this.dashCd, 0);
     this.specialCd -= dt;
     this.stun -= dt;
     this.invuln -= dt;
@@ -156,21 +185,19 @@ export class SimChar {
       if (this.windup <= 0) ctx.meleeHit(this.id);
     }
 
-    // acciones
+    // acciones (dependen del modo y del papel de cada uno)
     if (this.stun <= 0) {
-      if (it.action) {
-        if (this.isChaser) this.tryAttack(ctx, it);
-        else this.tryDash(ctx, it);
-      }
-      if (it.special) {
-        if (this.isChaser) this.tryThrow(ctx, it);
-        else this.trySmoke(ctx);
-      }
+      if (it.action) this.use(ctx.ability(this, 'action'), ctx, it);
+      if (it.special) this.use(ctx.ability(this, 'special'), ctx, it);
     }
 
+    // Escondite: disfrazado, con Shift se ancla y se queda totalmente quieto.
+    this.anchored = this.disguise >= 0 && it.sprint;
+    if (this.disguise >= 0) it.sprint = false;
+
     // dirección
-    let mx = this.stun > 0 ? 0 : it.mx;
-    let my = this.stun > 0 ? 0 : it.my;
+    let mx = this.stun > 0 || this.anchored ? 0 : it.mx;
+    let my = this.stun > 0 || this.anchored ? 0 : it.my;
     const len = Math.hypot(mx, my);
     if (len > 1) {
       mx /= len;
@@ -185,14 +212,15 @@ export class SimChar {
     const grid = ctx.grid;
     this.terrain = grid.terrainAt(this.x, this.y);
     const T = B.terrain;
-    const base = this.isChaser ? B.chaser : B.escapist;
-    let speed = base.speed * (this.human ? 1 : ctx.ai.speedMul);
+    const asChaser = this.chaserStats(ctx);
+    const base = asChaser ? B.chaser : B.escapist;
+    let speed = base.speed * (this.human ? 1 : ctx.ai.speedMul) * ctx.speedMul(this);
     if (this.terrain === Terrain.Quicksand) speed *= T.quicksandSlow;
     else if (this.terrain === Terrain.DeepSnow) speed *= T.deepSnowSlow;
     if (this.bootTime > 0) speed *= B.items.bootMultiplier;
     if (this.terrain === Terrain.Lane) speed *= CITY.laneMultiplier;
 
-    const wantSprint = it.sprint && len > 0.1 && this.exhaustTimer <= 0 && this.energy > 0;
+    const wantSprint = it.sprint && len > 0.1 && this.exhaustTimer <= 0 && this.energy > 0 && canSprintFor(ctx.mode, this.team);
     this.sprinting = wantSprint;
     if (wantSprint) {
       speed *= base.sprintMultiplier;
@@ -207,7 +235,7 @@ export class SimChar {
       this.energy = Math.min(this.energyMax, this.energy + base.energyRegen * dt);
     }
 
-    if (this.isChaser) {
+    if (asChaser) {
       const C = B.chaser;
       if (len > 0.3) {
         const ang = Math.atan2(my, mx);
@@ -231,7 +259,9 @@ export class SimChar {
     const onIce = this.terrain === Terrain.Ice;
     if (onIce) accel *= len > 0.1 ? T.iceControl : T.iceControl * T.iceFriction;
 
-    if (this.dashTime > 0) {
+    if (this.anchored) {
+      this.vx = this.vy = 0;
+    } else if (this.dashTime > 0) {
       this.dashTime -= dt;
       this.vx = this.dashX * B.escapist.dashSpeed;
       this.vy = this.dashY * B.escapist.dashSpeed;
@@ -280,6 +310,32 @@ export class SimChar {
   }
 
   // ------------------------------------------------------------------ acciones
+
+  private use(a: Ability, ctx: SimCtx, it: Intent): void {
+    switch (a) {
+      case 'attack':
+        return this.tryAttack(ctx, it);
+      case 'dash':
+        return this.tryDash(ctx, it);
+      case 'throw':
+        return this.tryThrow(ctx, it);
+      case 'smoke':
+        return this.trySmoke(ctx);
+      case 'item':
+        if (this.heldItem) {
+          this.specialBuf = 0;
+          ctx.useItem(this.id);
+        }
+        return;
+      case 'disguise':
+        if (this.specialCd <= 0) {
+          this.specialBuf = 0;
+          this.specialCd = 0.4;
+          ctx.disguise(this.id);
+        }
+        return;
+    }
+  }
 
   private tryAttack(ctx: SimCtx, it: Intent): void {
     if (this.attackCd > 0 || this.swing > 0) return;
@@ -342,7 +398,7 @@ export class SimChar {
   // ------------------------------------------------------------------ daño
 
   takeHit(ctx: SimCtx, dmg: number, attacker: SimChar | null, nx: number, ny: number, kb: number): HitResult {
-    if (!this.alive || this.isChaser || this.trapped > 0) return 'none';
+    if (!this.alive || this.trapped > 0) return 'none';
     if (this.dashTime > 0 && B.escapist.dashIFrames) {
       this.stats.dodges++;
       ctx.emit({ t: 'dodge', v: this.id });
@@ -376,16 +432,7 @@ export class SimChar {
       this.dashTime = 0;
       this.shield = false;
       this.bootTime = 0;
-      if (RESCUE.enabled) {
-        // Enjamonado: espera a que le rescaten.
-        this.trapped = RESCUE.trapSeconds;
-        this.rescueProg = 0;
-        this.trappedBy = attacker ? attacker.id : -1;
-        this.vx = this.vy = 0;
-        ctx.emit({ t: 'trap', v: this.id, a: attacker ? attacker.id : -1 });
-      } else {
-        this.knockOut(ctx, attacker ? attacker.id : -1);
-      }
+      ctx.downed(this.id, attacker ? attacker.id : -1);
     }
     return 'hit';
   }
@@ -399,7 +446,20 @@ export class SimChar {
     this.vx = this.vy = this.kbx = this.kby = 0;
     this.dashTime = 0;
     this.shield = false;
+    this.disguise = -1;
+    this.anchored = false;
+    this.bomb = false;
     ctx.emit({ t: 'ko', v: this.id, a: by });
+  }
+
+  /** Pilla Jamón: enjamonado, espera a que le rescaten. */
+  trap(ctx: SimCtx, by: number): void {
+    if (!RESCUE.enabled) return this.knockOut(ctx, by);
+    this.trapped = RESCUE.trapSeconds;
+    this.rescueProg = 0;
+    this.trappedBy = by;
+    this.vx = this.vy = 0;
+    ctx.emit({ t: 'trap', v: this.id, a: by });
   }
 
   /** Liberado por un compañero. */

@@ -26,9 +26,11 @@ const PAD_ACTIONS: Record<Action, number[]> = {
   right: [PAD.RIGHT],
   action: [PAD.A],
   sprint: [PAD.RB, PAD.RT, PAD.LB],
-  special: [PAD.X, PAD.Y],
+  special: [PAD.X],
   pause: [PAD.START],
   talk: [PAD.BACK],
+  rotate: [PAD.Y],
+  spin: [PAD.LT],
 };
 
 type NavDir = 'up' | 'down' | 'left' | 'right';

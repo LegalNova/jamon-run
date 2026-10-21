@@ -4,8 +4,8 @@ import { profile, saveLook } from '../config/profile';
 import { audio } from '../core/audio';
 import { input } from '../core/input';
 import { EXTRAS, GLASSES, HAIR_COLORS, HAIR_STYLES, HATS, Look, LOOK_COLORS, LOOK_LIMITS, NAME_MAX, randomLook, SKIN_TONES, cleanName } from '../../shared/look';
-import { ensureCharTexture, Team } from '../gfx/characters';
-import { hexToInt, TEAM_COLORS } from '../gfx/palette';
+import { ensureCharTexture, Outfit } from '../gfx/characters';
+import { hexToInt } from '../gfx/palette';
 import { Button, Menu, OptionRow, panel, text, UI } from '../ui/widgets';
 import { Backdrop, fadeIn, fadeTo } from './common';
 import { net } from '../net/NetClient';
@@ -15,13 +15,24 @@ type Field = Exclude<keyof Look, 'name'>;
 const DIRS = ['down', 'side', 'up'] as const;
 
 /** "Mi personaje": nombre, color, piel, peinado, sombrero, gafas y extra. */
+/** Atuendos que te puedes probar (en partida dependen del modo, el equipo y la ciudad). */
+const OUTFIT_NAMES: Record<Outfit, string> = {
+  casual: 'TU ROPA',
+  guchi: 'ROJO GUCHI',
+  blue: 'AZUL',
+  police: 'POLICÍA (PARÍS)',
+  military: 'MILITAR (CEUTA)',
+  street: 'CALLE (BCN)',
+  zombie: 'ZOMBI',
+};
+
 export class CharacterScene extends Phaser.Scene {
   private look!: Look;
   private menu!: Menu;
   private backdrop!: Backdrop;
   private preview!: Phaser.GameObjects.Sprite;
   private ham!: Phaser.GameObjects.Image;
-  private uniform: Team | null = null;
+  private uniform: Outfit = 'casual';
   private dirIdx = 0;
   private dirTimer = 0;
   private typing = false;
@@ -37,7 +48,7 @@ export class CharacterScene extends Phaser.Scene {
   init(data: { back?: string }): void {
     this.backTo = data.back ?? 'Menu';
     this.look = { ...profile.look };
-    this.uniform = null;
+    this.uniform = 'casual';
     this.typing = false;
     this.dirIdx = 0;
   }
@@ -85,10 +96,10 @@ export class CharacterScene extends Phaser.Scene {
         x,
         y,
         'PROBAR UNIFORME',
-        () => (this.uniform === null ? 'NINGUNO' : `EQUIPO ${TEAM_COLORS[this.uniform].team}`),
+        () => OUTFIT_NAMES[this.uniform],
         (d) => {
-          const order: (Team | null)[] = [null, 'chaser', 'escapist'];
-          this.uniform = order[(order.indexOf(this.uniform) + d + 3) % 3];
+          const order = Object.keys(OUTFIT_NAMES) as Outfit[];
+          this.uniform = order[(order.indexOf(this.uniform) + d + order.length) % order.length];
           this.refresh();
         },
         W,
@@ -121,11 +132,12 @@ export class CharacterScene extends Phaser.Scene {
   }
 
   private refresh(): void {
-    const key = ensureCharTexture(this, this.uniform, this.look);
+    const team = this.uniform === 'guchi' ? 'escapist' : this.uniform === 'casual' ? null : 'chaser';
+    const key = ensureCharTexture(this, team, this.look, this.uniform);
     const dir = DIRS[this.dirIdx];
     this.preview.setTexture(key, `${dir}_idle0`);
     this.preview.play(`${key}_${dir}_idle`);
-    this.ham.setVisible(this.uniform === 'chaser' && dir !== 'up');
+    this.ham.setVisible(['blue', 'police', 'military', 'street'].includes(this.uniform) && dir !== 'up');
     this.colorSwatch.clear();
     this.colorSwatch.fillStyle(0x0d0b14, 1).fillRect(20, 38, 12, 12);
     this.colorSwatch.fillStyle(hexToInt(LOOK_COLORS[this.look.color].hex), 1).fillRect(21, 39, 10, 10);

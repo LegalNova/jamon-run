@@ -7,6 +7,16 @@ import { gridTexture, PixelGrid, rng, stripTexture } from './pixel';
 export type { Team };
 export type Dir = 'down' | 'up' | 'side';
 
+/**
+ * Atuendo: 'guchi' (rojos), 'blue' (azules clásicos), 'police' (París), 'military' (Ceuta),
+ * 'street' (Barcelona, gente de la calle con brazalete azul), 'zombie' (Infección), 'casual' (ropa propia).
+ */
+export type Outfit = 'guchi' | 'blue' | 'police' | 'military' | 'street' | 'zombie' | 'casual';
+
+/** ¿Es un atuendo de cazador (cara seria, brazalete azul)? */
+const HUNTER_OUTFITS: Outfit[] = ['blue', 'police', 'military', 'street'];
+const ARMBAND = '#3d8ff2';
+
 /** Tamaño de cada frame de personaje: 16x20 (4 filas libres arriba para sombreros y peinados). */
 export const CHAR_W = 16;
 export const CHAR_H = 20;
@@ -92,14 +102,29 @@ interface Colors {
   shoe: string;
 }
 
-function colorsFor(team: Team | null, look: Look): Colors {
+function colorsFor(o: Outfit, look: Look): Colors {
   const skin = SKIN_TONES[look.skin] ?? SKIN_TONES[0];
   const hair = HAIR_COLORS[look.hairColor]?.hex ?? '#3b2a22';
   const own = LOOK_COLORS[look.color]?.hex ?? '#f77622';
-  const u = team
-    ? UNIFORM[team]
-    : { shirt: own, shirtDark: shade(own, -50), shirtLight: shade(own, 50), pants: PAL.pants, pantsDark: PAL.pantsDark, shoe: PAL.shoe };
-  return { skin: skin.skin, skinShade: skin.shade, hair, hairDark: shade(hair, -35), own, ownDark: shade(own, -50), ...u };
+  type Cloth = { shirt: string; shirtDark: string; shirtLight: string; pants: string; pantsDark: string; shoe: string };
+  const casual: Cloth = { shirt: own, shirtDark: shade(own, -50), shirtLight: shade(own, 50), pants: PAL.pants, pantsDark: PAL.pantsDark, shoe: PAL.shoe };
+  let u: Cloth = casual;
+  if (o === 'guchi') u = UNIFORM.escapist;
+  else if (o === 'blue') u = UNIFORM.chaser;
+  else if (o === 'police') u = { shirt: '#26346b', shirtDark: '#161f45', shirtLight: '#4a5ea8', pants: '#1a2350', pantsDark: '#10163a', shoe: '#14121a' };
+  else if (o === 'military') u = { shirt: '#56662f', shirtDark: '#3b4820', shirtLight: '#7e8f48', pants: '#4a5728', pantsDark: '#323c1a', shoe: '#2a2018' };
+  else if (o === 'street') u = { ...casual, pants: '#3d5a8a', pantsDark: '#2a4066', shoe: '#e8e8e8' };
+  else if (o === 'zombie') u = { shirt: shade(own, -70), shirtDark: shade(own, -100), shirtLight: shade(own, -30), pants: '#3a3340', pantsDark: '#26212b', shoe: '#2a2430' };
+  const z = o === 'zombie';
+  return {
+    skin: z ? '#8fbf6a' : skin.skin,
+    skinShade: z ? '#5f8f4a' : skin.shade,
+    hair: z ? shade(hair, -20) : hair,
+    hairDark: shade(hair, -45),
+    own,
+    ownDark: shade(own, -50),
+    ...u,
+  };
 }
 
 // ------------------------------------------------------------------ cabeza
@@ -252,9 +277,34 @@ function drawHair(p: Painter, style: number, dir: Dir, C: Colors, hatOn: boolean
   }
 }
 
-function drawFace(p: Painter, team: Team | null, dir: Dir, pose: Pose, C: Colors): void {
+function drawFace(p: Painter, o: Outfit, dir: Dir, pose: Pose, C: Colors): void {
   const ink = PAL.ink;
   if (dir === 'up') return;
+  if (o === 'zombie') {
+    // Ojos que brillan y boca abierta.
+    const EYE = '#e6ff5a';
+    if (dir === 'side') {
+      p.h(10, 5, EYE);
+      p.h(11, 5, EYE);
+      p.h(10, 8, ink);
+      p.h(11, 8, '#7a2030');
+      p.h(7, 6, C.skinShade);
+      return;
+    }
+    p.h(5, 5, EYE);
+    p.h(6, 5, EYE);
+    p.h(9, 5, EYE);
+    p.h(10, 5, EYE);
+    p.h(5, 6, ink);
+    p.h(10, 6, ink);
+    p.hr(6, 8, 4, 1, ink);
+    p.h(7, 9, '#7a2030');
+    p.h(8, 9, '#7a2030');
+    p.h(4, 7, C.skinShade);
+    p.h(11, 4, C.skinShade);
+    return;
+  }
+  const team: Team | null = o === 'guchi' ? 'escapist' : HUNTER_OUTFITS.includes(o) ? 'chaser' : null;
   if (dir === 'side') {
     p.h(7, 5, C.skinShade);
     p.h(7, 6, C.skinShade);
@@ -583,25 +633,57 @@ function drawHat(p: Painter, hat: number, dir: Dir, C: Colors, guchi: boolean): 
   }
 }
 
-function drawHead(p: Painter, team: Team | null, look: Look, dir: Dir, pose: Pose, C: Colors): void {
+/** Gorra de uniforme: quepis de la policía de París o boina militar. */
+function drawUniformHat(p: Painter, o: Outfit, dir: Dir): void {
+  if (o === 'police') {
+    const N = '#1a2350';
+    for (let y = -2; y <= 2; y++) for (let x = 4; x <= 11; x++) p.h(x, y, N);
+    p.hr(4, 1, 8, 1, '#c2414b');
+    p.h(5, -2, '#3a4a8a');
+    if (dir === 'down') {
+      p.hr(3, 3, 10, 1, '#0e1430');
+      p.h(7, 0, GOLD);
+      p.h(8, 0, GOLD);
+      p.h(7, -1, GOLD_DARK);
+    } else if (dir === 'side') {
+      for (let x = 9; x <= 13; x++) p.h(x, 3, '#0e1430');
+      p.h(10, 0, GOLD);
+    } else p.hr(5, 3, 6, 1, '#0e1430');
+  } else if (o === 'military') {
+    const G = '#3e4a1e';
+    for (let x = 3; x <= 12; x++) p.h(x, 1, G);
+    for (let x = 4; x <= 13; x++) p.h(x, 0, G);
+    p.hr(5, -1, 7, 1, G);
+    p.hr(3, 2, 10, 1, '#2a3214');
+    if (dir === 'down') {
+      p.h(5, 0, GOLD);
+      p.h(5, 1, GOLD_DARK);
+    } else if (dir === 'side') p.h(11, 0, GOLD);
+  }
+}
+
+function drawHead(p: Painter, o: Outfit, look: Look, dir: Dir, pose: Pose, C: Colors): void {
   for (const [y, x0, x1] of HEAD_ROWS) for (let x = x0; x <= x1; x++) p.h(x, y, C.skin);
   for (let x = 5; x <= 10; x++) p.h(x, 9, C.skinShade);
-  const guchi = team === 'escapist';
-  const hatOn = guchi || look.hat !== 0;
+  const guchi = o === 'guchi';
+  const uniformHat = o === 'police' || o === 'military';
+  const hatOn = guchi || uniformHat || look.hat !== 0;
   drawHair(p, look.hair, dir, C, hatOn);
-  drawFace(p, team, dir, pose, C);
+  drawFace(p, o, dir, pose, C);
   drawExtra(p, look.extra, dir, C);
   if (guchi && dir === 'down') p.h(12, 8, GOLD);
   if (guchi && dir === 'side') p.h(7, 8, GOLD);
-  drawGlasses(p, look.glasses, dir);
-  drawHat(p, look.hat, dir, C, guchi);
+  if (o !== 'zombie') drawGlasses(p, look.glasses, dir);
+  if (uniformHat) drawUniformHat(p, o, dir);
+  else if (o !== 'zombie' || look.hat !== 0) drawHat(p, look.hat, dir, C, guchi);
 }
 
 // ------------------------------------------------------------------ cuerpo
 
-function drawBody(p: Painter, team: Team | null, dir: Dir, pose: Pose, C: Colors): void {
-  const red = team === 'escapist';
-  const blue = team === 'chaser';
+function drawBody(p: Painter, o: Outfit, dir: Dir, pose: Pose, C: Colors): void {
+  const red = o === 'guchi';
+  const blue = o === 'blue';
+  const hunter = HUNTER_OUTFITS.includes(o);
   const leg = (x: number, c: string) => {
     p.b(x, 13, c);
     p.b(x + 1, 13, c);
@@ -621,8 +703,17 @@ function drawBody(p: Painter, team: Team | null, dir: Dir, pose: Pose, C: Colors
       p.b(10, 12, C.own);
     }
     if (blue) p.b(5, 12, PAL.white);
-    // brazo
-    p.b(7 + pose.handR, 11, blue ? C.own : C.shirtDark);
+    if (o === 'police') p.b(5, 12, PAL.offWhite);
+    if (o === 'military') {
+      p.b(6, 10, C.shirtDark);
+      p.b(8, 11, C.shirtLight);
+    }
+    if (o === 'zombie') {
+      p.b(7, 10, C.skin);
+      p.b(9, 11, C.skinShade);
+    }
+    // brazo (los cazadores llevan el brazalete azul)
+    p.b(7 + pose.handR, 11, blue ? C.own : hunter ? ARMBAND : C.shirtDark);
     p.b(8 + pose.handR, 12, C.skin);
     if (pose.legs === 'stand' || pose.legs === 'mid') {
       leg(6, C.pantsDark);
@@ -668,6 +759,25 @@ function drawBody(p: Painter, team: Team | null, dir: Dir, pose: Pose, C: Colors
       p.b(7, 11, PAL.white);
       for (let x = 5; x <= 10; x++) p.b(x, 12, PAL.offWhite);
       p.b(7, 12, GOLD);
+    } else if (o === 'police') {
+      // Camisa azul marino, placa dorada y cinturón blanco.
+      p.b(7, 10, C.shirtLight);
+      p.b(8, 10, C.shirtLight);
+      p.b(9, 11, GOLD);
+      for (let x = 4; x <= 11; x++) p.b(x, 12, PAL.offWhite);
+      p.b(7, 12, '#14121a');
+    } else if (o === 'military') {
+      // Camuflaje y cinturón.
+      [[5, 10], [9, 11], [10, 10], [6, 11]].forEach(([x, y]) => p.b(x, y, C.shirtDark));
+      [[8, 10], [4, 11], [11, 11]].forEach(([x, y]) => p.b(x, y, C.shirtLight));
+      for (let x = 4; x <= 11; x++) p.b(x, 12, '#2a2018');
+      p.b(7, 12, GOLD_DARK);
+    } else if (o === 'zombie') {
+      // Ropa rota.
+      p.b(6, 11, C.skin);
+      p.b(9, 10, C.skinShade);
+      p.b(10, 12, C.skin);
+      p.b(5, 12, C.shirtDark);
     } else {
       p.b(7, 11, C.shirtLight);
     }
@@ -682,8 +792,8 @@ function drawBody(p: Painter, team: Team | null, dir: Dir, pose: Pose, C: Colors
   // manos (el brazalete del uniforme azul lleva tu color)
   p.b(3, 11 + pose.handL, C.skin);
   p.b(12, 11 + pose.handR, C.skin);
-  p.b(3, 10 + pose.handL, blue ? C.own : C.shirtDark);
-  p.b(12, 10 + pose.handR, blue ? C.own : C.shirtDark);
+  p.b(3, 10 + pose.handL, blue ? C.own : hunter ? ARMBAND : C.shirtDark);
+  p.b(12, 10 + pose.handR, blue ? C.own : hunter ? ARMBAND : C.shirtDark);
   const legL = pose.legs !== 'R';
   const legR = pose.legs !== 'L';
   [5, 6, 9, 10].forEach((x) => p.b(x, 13, C.pants));
@@ -691,6 +801,11 @@ function drawBody(p: Painter, team: Team | null, dir: Dir, pose: Pose, C: Colors
     p.b(5, 13, '#2f9e5a');
     p.b(10, 13, '#d8222c');
   }
+  if (o === 'police') {
+    p.b(6, 13, '#c2414b');
+    p.b(9, 13, '#c2414b');
+  }
+  if (o === 'military') p.b(9, 13, C.pantsDark);
   const foot = (x: number, down: boolean) => {
     p.b(x, down ? 14 : 13, C.shoe);
     p.b(x + 1, down ? 14 : 13, C.shoe);
@@ -699,11 +814,13 @@ function drawBody(p: Painter, team: Team | null, dir: Dir, pose: Pose, C: Colors
   foot(9, legR);
 }
 
-function frame(team: Team | null, look: Look, dir: Dir, pose: Pose): PixelGrid {
+function frame(o: Outfit, look: Look, dir: Dir, pose: Pose): PixelGrid {
   const g = new PixelGrid(CHAR_W, CHAR_H);
-  const C = colorsFor(team, look);
-  drawBody(new Painter(g, pose.lean, 0), team, dir, pose, C);
-  drawHead(new Painter(g, pose.lean, pose.headDy), team, look, dir, pose, C);
+  const C = colorsFor(o, look);
+  // Los zombis van algo encorvados (cabeza adelantada).
+  const zl = o === 'zombie' && dir === 'side' ? 1 : 0;
+  drawBody(new Painter(g, pose.lean, 0), o, dir, pose, C);
+  drawHead(new Painter(g, pose.lean + zl, pose.headDy + (o === 'zombie' ? 1 : 0)), o, look, dir, pose, C);
   const out = pose.bob ? g.shifted(0, pose.bob) : g;
   out.outline(PAL.outline);
   return out;
@@ -728,8 +845,9 @@ export const CHAR_FRAMES = Object.keys(POSES);
  * Devuelve (y crea si hace falta) la textura animada de un personaje.
  * team = null para la vista previa sin uniforme.
  */
-export function ensureCharTexture(scene: Phaser.Scene, team: Team | null, look: Look): string {
-  const key = `chr_${team ?? 'none'}_${lookKey(look)}`;
+export function ensureCharTexture(scene: Phaser.Scene, team: Team | null, look: Look, outfit?: Outfit): string {
+  const o: Outfit = outfit ?? (team === 'escapist' ? 'guchi' : team === 'chaser' ? 'blue' : 'casual');
+  const key = `chr_${o === 'guchi' ? 'escapist' : o === 'blue' ? 'chaser' : o === 'casual' ? 'none' : o}_${lookKey(look)}`;
   if (scene.textures.exists(key)) return key;
   const frames: { name: string; grid: PixelGrid }[] = [];
   for (const dir of ['down', 'up', 'side'] as Dir[]) {
@@ -737,7 +855,7 @@ export function ensureCharTexture(scene: Phaser.Scene, team: Team | null, look: 
       const p = { ...base, ...POSES[name] };
       if (dir === 'side' && name === 'atk') p.handR = 3;
       if (dir === 'side' && name === 'hurt') p.lean = -1;
-      frames.push({ name: `${dir}_${name}`, grid: frame(team, look, name === 'hurt' && dir === 'up' ? 'down' : dir, p) });
+      frames.push({ name: `${dir}_${name}`, grid: frame(o, look, name === 'hurt' && dir === 'up' ? 'down' : dir, p) });
     }
   }
   stripTexture(scene, key, frames);

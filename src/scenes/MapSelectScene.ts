@@ -5,11 +5,23 @@ import { input } from '../core/input';
 import { FONT, fontText } from '../gfx/font';
 import { buildMiniTexture } from '../gfx/tiles';
 import { Grid } from '../world/grid';
-import { MapDef, MAPS } from '../world/maps';
+import { MapDef, MAPS, styleOf } from '../world/maps';
+import { modeInfo } from '../../shared/modes/rules';
+import type { ModeId } from '../../shared/sim/types';
 import { Button, Focusable, Menu, text, UI } from '../ui/widgets';
 import { Backdrop, fadeIn, fadeTo } from './common';
 
-const ACCENTS: Record<string, number> = { forest: 0x63c74d, desert: 0xfeae34, snow: 0x7cc8ff, paris: 0x9aa7bf, barcelona: 0xe8c84a, ceuta: 0x5ab8e8 };
+const ACCENTS: Record<string, number> = {
+  forest: 0x63c74d,
+  desert: 0xfeae34,
+  snow: 0x7cc8ff,
+  paris: 0x9aa7bf,
+  barcelona: 0xe8c84a,
+  ceuta: 0x5ab8e8,
+  plaza: 0xff7ab8,
+  azotea: 0xb55088,
+  patio: 0xfee761,
+};
 const TAGS: Record<string, string> = {
   forest: 'ESCONDITES',
   desert: 'ARENAS LENTAS',
@@ -17,7 +29,19 @@ const TAGS: Record<string, string> = {
   paris: 'METRO: TELETRANSPORTE',
   barcelona: 'CARRIL BICI TURBO',
   ceuta: 'RÁFAGAS DE LEVANTE',
+  plaza: 'ARENA PEQUEÑA',
+  azotea: 'ARENA PEQUEÑA',
+  patio: 'ARENA PEQUEÑA',
 };
+
+/** Mapas que se ofrecen en cada modo (6 por pantalla). */
+export function mapsForMode(mode: ModeId): MapDef[] {
+  if (modeInfo(mode).arenas) {
+    const order = ['plaza', 'azotea', 'patio', 'paris', 'barcelona', 'ceuta'];
+    return order.map((id) => MAPS.find((m) => m.id === id)!);
+  }
+  return MAPS.filter((m) => !m.arena);
+}
 const CW = 150;
 const CH = 112;
 
@@ -40,7 +64,7 @@ class MapCard extends Phaser.GameObjects.Container implements Focusable {
     const name = scene.add.bitmapText(0, -H / 2 + 12, FONT, fontText(def.name)).setOrigin(0.5).setScale(2).setTint(accent);
     const grid = new Grid(def.rows);
     const key = 'preview_' + def.id;
-    buildMiniTexture(scene, key, grid, def.id, 2);
+    buildMiniTexture(scene, key, grid, styleOf(def.id), 2);
     const prev = scene.add.image(0, -H / 2 + 56, key);
     const frame = scene.add.graphics();
     frame.lineStyle(1, 0x0d0b14, 1).strokeRect(-49, -H / 2 + 25, 98, 62);
@@ -91,27 +115,34 @@ export class MapSelectScene extends Phaser.Scene {
   private menu!: Menu;
   private cards: MapCard[] = [];
   private backdrop!: Backdrop;
+  private mode: ModeId = 'pilla';
 
   constructor() {
     super('MapSelect');
   }
 
+  init(data: { mode?: ModeId }): void {
+    this.mode = data.mode ?? 'pilla';
+  }
+
   create(): void {
     fadeIn(this);
     this.backdrop = new Backdrop(this, false);
+    const info = modeInfo(this.mode);
     text(this, VIEW_W / 2, 8, 'ELIGE UN MAPA', { scale: 2, color: UI.focusLight });
     this.menu = new Menu(true);
-    this.cards = MAPS.map((def, i) => {
+    this.cards = mapsForMode(this.mode).map((def, i) => {
       const col = i % 3;
       const row = Math.floor(i / 3);
       const card = new MapCard(this, VIEW_W / 2 + (col - 1) * 156, 83 + row * 114, def, () => {
-        this.time.delayedCall(140, () => fadeTo(this, 'RoleReveal', { mapId: def.id }));
+        this.time.delayedCall(140, () => fadeTo(this, 'RoleReveal', { mode: this.mode, mapId: def.id }));
       });
       this.menu.add(card);
       return card;
     });
-    this.menu.add(new Button(this, VIEW_W / 2, VIEW_H - 8, 'VOLVER', () => fadeTo(this, 'Menu'), 80, 13));
-    text(this, VIEW_W / 2, 19, 'ARRIBA CLÁSICOS · ABAJO CIUDADES (NUEVO)', { color: UI.muted });
+    this.menu.add(new Button(this, VIEW_W / 2, VIEW_H - 8, 'VOLVER', () => fadeTo(this, 'ModeSelect'), 80, 13));
+    const sub = info.arenas ? 'ARRIBA ARENAS PEQUEÑAS · ABAJO CIUDADES' : info.night ? `${info.name} · DE NOCHE` : 'ARRIBA CLÁSICOS · ABAJO CIUDADES';
+    text(this, VIEW_W / 2, 19, sub, { color: UI.muted });
   }
 
   update(_t: number, delta: number): void {
@@ -120,7 +151,7 @@ export class MapSelectScene extends Phaser.Scene {
     for (const c of this.cards) c.tick(dt);
     if (input.back()) {
       audio.play('back');
-      fadeTo(this, 'Menu');
+      fadeTo(this, 'ModeSelect');
       return;
     }
     const n = this.cards.length;
