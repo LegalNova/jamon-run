@@ -4,6 +4,7 @@ import { LOOK_COLORS } from '../../shared/look';
 import { SimChar, SWING_TIME } from '../../shared/sim/Char';
 import { Grid, Terrain } from '../../shared/grid';
 import { CHAR_H, ensureCharTexture, Outfit } from '../gfx/characters';
+import { drawFrame, hatKey, hatLift, makeTrail } from './cosmetics';
 import { FONT, FONT_PLAIN, fontText } from '../gfx/font';
 import type { Fx } from '../gfx/fx';
 import { hexToInt, PAL, TEAM_COLORS } from '../gfx/palette';
@@ -58,6 +59,13 @@ export class CharacterView {
   private bombImg: Phaser.GameObjects.Image | null = null;
   private head: Phaser.GameObjects.Sprite | null = null;
   private sparkT = 0;
+  private hat: Phaser.GameObjects.Image | null = null;
+  private trail: Phaser.GameObjects.Particles.ParticleEmitter | null = null;
+  private trailT = 0;
+  private frameG: Phaser.GameObjects.Graphics | null = null;
+  private flames: Phaser.GameObjects.Particles.ParticleEmitter | null = null;
+  private emoteImg: Phaser.GameObjects.Image | null = null;
+  private emoteT = 0;
 
   constructor(
     private scene: Phaser.Scene,
@@ -76,6 +84,16 @@ export class CharacterView {
       .setOrigin(0.5, 1)
       .setDepth(9000);
     if (style.hasHam(c)) this.ham = scene.add.image(c.x, c.y, 'ham').setOrigin(2 / 15, 4.5 / 9);
+    // cosméticos
+    const hk = hatKey(c.cos.hat);
+    if (hk) this.hat = scene.add.image(c.x, c.y, hk).setOrigin(0.5, 1);
+    this.trail = makeTrail(scene, c.cos.trail);
+    if (c.cos.frame) this.frameG = scene.add.graphics().setDepth(9000);
+    if (c.streak >= 2) {
+      this.flames = scene.add
+        .particles(0, 0, 'p_flame', { lifespan: 400, speed: { min: 4, max: 14 }, angle: { min: 250, max: 290 }, scale: { start: 1, end: 0 }, tint: [0xfeae34, 0xe43b44, 0xfee761], frequency: 70, quantity: 1 })
+        .setDepth(9001);
+    }
     this.shieldRing = scene.add.image(c.x, c.y, 'p_ring').setTint(0x7cc8ff).setVisible(false).setScale(1.25);
     this.hpBar = scene.add.graphics().setDepth(8990);
     this.cage = scene.add.image(c.x, c.y, 'cage').setOrigin(0.5, 1).setVisible(false);
@@ -116,8 +134,19 @@ export class CharacterView {
     }
   }
 
+  /** Emote encima de la cabeza (tecla G). */
+  showEmote(id: string): void {
+    if (!this.scene.textures.exists(id)) return;
+    this.emoteImg?.destroy();
+    this.emoteImg = this.scene.add.image(this.sprite.x, this.sprite.y - 34, id).setDepth(9610).setScale(0);
+    this.scene.tweens.add({ targets: this.emoteImg, scale: 1.4, duration: 220, ease: 'Back.easeOut' });
+    this.emoteT = 1.8;
+  }
+
   onKo(): void {
     this.ghost = true;
+    this.hat?.setVisible(false);
+    this.flames?.stop();
     this.prop?.setVisible(false);
     this.bombImg?.setVisible(false);
     this.head?.setVisible(false);
@@ -199,6 +228,7 @@ export class CharacterView {
       this.shadow.setPosition(c.x, footY);
       this.cage.setPosition(c.x, footY + 2).setDepth(c.y + 1);
       this.ham?.setVisible(false);
+      this.hat?.setVisible(false);
       this.shieldRing.setVisible(false);
       this.hpBar.clear();
       this.lastHpDrawn = -3;
@@ -240,6 +270,8 @@ export class CharacterView {
       this.ham?.setVisible(false);
       this.head?.setVisible(false);
       this.bombImg?.setVisible(false);
+      this.hat?.setVisible(false);
+      this.frameG?.clear();
       this.shieldRing.setVisible(false);
       this.hpBar.clear();
       this.lastHpDrawn = -3;
@@ -386,6 +418,33 @@ export class CharacterView {
       this.hpBar.setPosition(Math.round(c.x), Math.round(footY - 24 + bob));
     }
 
+    // cosméticos: gorro, rastro, marco del nombre, llamas de racha
+    if (this.hat) {
+      const big = vc.bigHeads;
+      const headY = big ? footY - 7 - 12 * 1.8 + 6 : footY - 12 + (this.sprite.frame.name.endsWith('idle1') ? 1 : 0);
+      this.hat
+        .setPosition(c.x, headY - hatLift(c.cos.hat) * (big ? 1.8 : 1))
+        .setScale(big ? 1.8 : 1)
+        .setFlipX(this.sprite.flipX)
+        .setDepth(c.y + 0.7)
+        .setAlpha(alpha)
+        .setVisible(!hidden);
+    }
+    this.trailT -= dt;
+    if (this.trail && speed > 30 && this.trailT <= 0 && !hidden && c.invisible <= 0) {
+      this.trail.emitParticleAt(c.x - c.vx * 0.05, c.y + 1, 1);
+      this.trailT = 0.05;
+    }
+    if (this.frameG && this.nameTag) {
+      if (hidden || !this.nameTag.visible) this.frameG.clear();
+      else drawFrame(this.frameG, this.nameTag.x, this.nameTag.y - this.nameTag.height / 2, this.nameTag.width, c.cos.frame, this.clock);
+    }
+    if (this.flames) {
+      this.flames.setPosition(c.x, footY - 30 - lift);
+      this.flames.emitting = !hidden;
+    }
+    this.updateEmote(dt, c, footY - 36 - lift);
+
     // polvo al correr y estelas
     const onIce = grid.terrainAt(c.x, c.y) === Terrain.Ice;
     this.dustTimer -= dt;
@@ -401,6 +460,17 @@ export class CharacterView {
     if (c.bootTime > 0 && this.trailTimer <= 0 && speed > 30) {
       fx.speedTrail(c.x, c.y, 0xfee761);
       this.trailTimer = 0.04;
+    }
+  }
+
+  private updateEmote(dt: number, c: SimChar, y: number): void {
+    if (!this.emoteImg) return;
+    this.emoteT -= dt;
+    this.emoteImg.setPosition(c.x, y + Math.sin(this.clock * 6) * 2);
+    if (this.emoteT < 0.3) this.emoteImg.setAlpha(Math.max(0, this.emoteT / 0.3));
+    if (this.emoteT <= 0) {
+      this.emoteImg.destroy();
+      this.emoteImg = null;
     }
   }
 
@@ -431,5 +501,10 @@ export class CharacterView {
     this.prop?.destroy();
     this.bombImg?.destroy();
     this.head?.destroy();
+    this.hat?.destroy();
+    this.trail?.destroy();
+    this.frameG?.destroy();
+    this.flames?.destroy();
+    this.emoteImg?.destroy();
   }
 }

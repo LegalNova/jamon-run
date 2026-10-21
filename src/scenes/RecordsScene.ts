@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { VIEW_H, VIEW_W } from '../config/balance';
-import { wallet } from '../config/profile';
+import { account } from '../net/account';
 import { audio } from '../core/audio';
 import { input } from '../core/input';
 import { levelFor } from '../../shared/balance';
@@ -28,8 +28,9 @@ export class RecordsScene extends Phaser.Scene {
     this.backdrop = new Backdrop(this, false, 0.2);
     this.boardText = [];
     text(this, VIEW_W / 2, 12, 'RÉCORDS', { scale: 2, color: UI.focusLight });
-    const lv = levelFor(wallet.xp);
-    text(this, VIEW_W / 2, 28, `NIVEL ${lv.level} · ${wallet.coins} MONEDAS · ${Object.values(wallet.medals).reduce((a, b) => a + b, 0)} MEDALLAS`, { color: 0xffd23f });
+    const p = account.profile;
+    const lv = levelFor(p?.xp ?? 0);
+    text(this, VIEW_W / 2, 28, `NIVEL ${lv.level} · ${p?.lonchas ?? 0} LONCHAS · ${Object.values(p?.medals ?? {}).reduce((a, b) => a + b, 0)} MEDALLAS`, { color: 0xffd23f });
     const g = this.add.graphics();
     panel(g, 8, 38, 226, 196);
     panel(g, 246, 38, 226, 196);
@@ -37,7 +38,7 @@ export class RecordsScene extends Phaser.Scene {
     text(this, 359, 47, 'RANKING MUNDIAL (ONLINE)', { color: UI.focusLight });
     MODE_LIST.forEach((m, i) => {
       const y = 62 + i * 42;
-      const r = wallet.records[m.id];
+      const r = p?.records[m.id];
       this.add.image(22, y + 8, `mode_${m.id}`).setScale(0.6);
       text(this, 36, y, m.name, { origin: [0, 0.5], color: MODE_COLORS[m.id] });
       text(this, 36, y + 11, r ? `${r.games} PARTIDAS · ${r.wins} VICTORIAS` : 'SIN JUGAR TODAVÍA', { origin: [0, 0.5], color: UI.text });

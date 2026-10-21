@@ -15,11 +15,14 @@ import type { ModeId, RosterEntry, SimEvent, Stats, Team } from '../../shared/si
 import { CharacterView, CharStyle, ViewCtx } from '../game/CharacterView';
 import { GameModel, OfflineModel } from '../game/model';
 import { OnlineModel } from '../net/OnlineModel';
+import { account } from '../net/account';
 import { PICKUP_COLORS, PICKUP_NAMES, PickupView, ProjectileView, PropView } from '../game/views';
 import type { Outfit } from '../gfx/characters';
 import { Fx } from '../gfx/fx';
 import { TEAM_COLORS } from '../gfx/palette';
 import { GLOBAL_LABELS, PRIZE_LABELS } from '../ui/hype';
+import { hitBurst } from '../game/cosmetics';
+import { COSMETICS, Equipped } from '../../shared/economy';
 import { GameMap } from '../world/GameMap';
 import { viewSize } from './common';
 
@@ -42,6 +45,17 @@ export function outfitFor(mode: ModeId, style: BiomeId, team: Team): Outfit {
 }
 
 const HINT_SFX = ['hintWhistle', 'hintGiggle', 'hintOink', 'hintSqueak'] as const;
+
+/** Los bots también llevan algún cosmético (para que se vea la tienda en acción). */
+export function botCos(): Equipped {
+  const out: Equipped = { emote: 'emote_jamon', dance: 'dance_salto' };
+  for (const cat of ['hat', 'trail', 'hit', 'frame', 'dance'] as const) {
+    if (Math.random() > 0.35) continue;
+    const items = COSMETICS.filter((c) => c.cat === cat);
+    out[cat] = items[Math.floor(Math.random() * items.length)].id;
+  }
+  return out;
+}
 
 export interface ResultEntry {
   name: string;
@@ -121,6 +135,7 @@ export class GameScene extends Phaser.Scene {
   create(): void {
     this.cameras.main.fadeIn(250, 13, 11, 20);
     this.model = this.data_.model ?? this.createOffline();
+    account.xpAtStart = account.profile?.xp ?? null;
 
     const style = styleOf(this.model.mapId);
     this.map = new GameMap(this, style, this.model.grid);
@@ -166,6 +181,8 @@ export class GameScene extends Phaser.Scene {
       if (mode === 'bomba') role = 'escapist';
     }
     const playerIndex = Math.floor(Math.random() * (role === 'chaser' ? nCh : nEs));
+    const myCos = account.profile?.equipped ?? {};
+    const myStreak = account.profile?.mgStreak ?? 0;
     const roster: RosterEntry[] = [];
     let id = 0;
     let botI = Math.floor(Math.random() * 20);
@@ -173,13 +190,13 @@ export class GameScene extends Phaser.Scene {
       const me = role === 'chaser' && i === playerIndex;
       const name = botName(botI++);
       const horse = me && this.data_.horse !== undefined ? this.data_.horse : Math.floor(Math.random() * HYPE.horses.length);
-      roster.push({ id: id++, team: 'chaser', name: me ? profile.look.name : name, look: me ? profile.look : randomLook(name), human: me && !this.autotest, horse });
+      roster.push({ id: id++, team: 'chaser', name: me ? profile.look.name : name, look: me ? profile.look : randomLook(name), human: me && !this.autotest, horse, cos: me ? myCos : botCos(), streak: me ? myStreak : 0 });
     }
     for (let i = 0; i < nEs; i++) {
       const me = role === 'escapist' && i === playerIndex;
       const name = botName(botI++);
       const horse = me && this.data_.horse !== undefined ? this.data_.horse : Math.floor(Math.random() * HYPE.horses.length);
-      roster.push({ id: id++, team: 'escapist', name: me ? profile.look.name : name, look: me ? profile.look : randomLook(name), human: me && !this.autotest, horse });
+      roster.push({ id: id++, team: 'escapist', name: me ? profile.look.name : name, look: me ? profile.look : randomLook(name), human: me && !this.autotest, horse, cos: me ? myCos : botCos(), streak: me ? myStreak : 0 });
     }
     const playerId = roster.find((r) => r.team === role && (r.human || this.autotest))!.id;
     const pid = this.autotest ? roster.filter((r) => r.team === role)[playerIndex].id : playerId;
@@ -282,6 +299,7 @@ export class GameScene extends Phaser.Scene {
     }
     if (input.justPressed('special') && p.alive) this.model.press('special');
     if (input.justPressed('rotate') && p.alive) this.model.press('rotate');
+    if (input.justPressed('emote')) this.model.emote();
     if (input.justPressed('spin') && p.alive) {
       if (p.spinsLeft > 0 && this.model.matchTime >= HYPE.personalFrom && this.model.state === 'play') this.model.press('spin');
       else audio.play('denied');
@@ -394,6 +412,7 @@ export class GameScene extends Phaser.Scene {
           audio.play('hit');
           if (e.v === me.id) audio.play('hurt');
           fx.hit(v.x, v.y - 8, e.nx, e.ny);
+          hitBurst(this, v.x, v.y - 8, this.charOf(e.a)?.cos.hit);
           fx.float(v.x, v.y - 17, `-${e.dmg}`, 0xff5a5a);
           if (mine) this.shake(0.009, 140);
           else this.shake(0.0035, 90);
@@ -697,6 +716,9 @@ export class GameScene extends Phaser.Scene {
         }
         break;
       }
+      case 'emote':
+        this.viewOf(e.id)?.showEmote(e.e);
+        break;
       case 'race':
         this.events.emit('race', e.w);
         break;

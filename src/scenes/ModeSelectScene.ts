@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { VIEW_H, VIEW_W } from '../config/balance';
-import { wallet } from '../config/profile';
+import { account } from '../net/account';
 import { audio } from '../core/audio';
 import { input } from '../core/input';
 import { levelFor } from '../../shared/balance';
@@ -135,11 +135,11 @@ export class ModeSelectScene extends Phaser.Scene {
     fadeIn(this);
     this.backdrop = new Backdrop(this, false);
     text(this, VIEW_W / 2, 10, 'ELIGE MODO', { scale: 2, color: UI.focusLight });
-    const lv = levelFor(wallet.xp);
-    text(this, VIEW_W / 2, 24, `NIVEL ${lv.level} · ${wallet.coins} MONEDAS`, { color: 0xffd23f });
+    const lv = levelFor(account.profile?.xp ?? 0);
+    text(this, VIEW_W / 2, 24, `NIVEL ${lv.level}`, { color: 0x7cc8ff });
     this.menu = new Menu(true);
     this.cards = MODE_LIST.map((info, i) => {
-      const rec = wallet.records[info.id];
+      const rec = account.profile?.records[info.id];
       const extra = rec ? `RÉCORD ${rec.best} · ${rec.wins}/${rec.games} V` : '¡PRUÉBALO!';
       const card = new ModeCard(this, VIEW_W / 2 + (i - 1.5) * (CW + 8), 130, info, () => {
         this.time.delayedCall(140, () => fadeTo(this, 'Tutorial', { mode: info.id }));

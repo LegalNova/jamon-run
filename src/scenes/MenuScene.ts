@@ -24,6 +24,8 @@ export class MenuScene extends Phaser.Scene {
     const items: [string, () => void][] = [
       ['JUGAR ONLINE', () => fadeTo(this, 'Online')],
       ['JUGAR CON BOTS', () => fadeTo(this, 'ModeSelect')],
+      ['TIENDA', () => fadeTo(this, 'Shop')],
+      ['MISIONES', () => fadeTo(this, 'Missions')],
       ['MI PERSONAJE', () => fadeTo(this, 'Character', { back: 'Menu' })],
       ['RÉCORDS', () => fadeTo(this, 'Records')],
       ['OPCIONES', () => fadeTo(this, 'Options', { from: 'Menu' })],

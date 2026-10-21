@@ -61,6 +61,7 @@ export interface GameModel {
   setHeld(h: HeldInput): void;
   press(what: 'action' | 'special' | 'rotate' | 'spin'): void;
   say(phrase: number): void;
+  emote(): void;
   destroy(): void;
 }
 
@@ -144,6 +145,10 @@ export class OfflineModel implements GameModel {
 
   say(phrase: number): void {
     this.sim.say(this.playerId, phrase);
+  }
+
+  emote(): void {
+    this.sim.emote(this.playerId);
   }
 
   destroy(): void {

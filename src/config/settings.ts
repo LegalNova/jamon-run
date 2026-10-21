@@ -1,8 +1,8 @@
 import { BALANCE, Difficulty } from './balance';
 
-export type Action = 'up' | 'down' | 'left' | 'right' | 'action' | 'sprint' | 'special' | 'pause' | 'talk' | 'rotate' | 'spin';
+export type Action = 'up' | 'down' | 'left' | 'right' | 'action' | 'sprint' | 'special' | 'pause' | 'talk' | 'rotate' | 'spin' | 'emote';
 
-export const ACTIONS: Action[] = ['up', 'down', 'left', 'right', 'action', 'sprint', 'special', 'rotate', 'spin', 'talk', 'pause'];
+export const ACTIONS: Action[] = ['up', 'down', 'left', 'right', 'action', 'sprint', 'special', 'rotate', 'spin', 'talk', 'emote', 'pause'];
 
 export const ACTION_LABELS: Record<Action, string> = {
   up: 'ARRIBA',
@@ -16,6 +16,7 @@ export const ACTION_LABELS: Record<Action, string> = {
   talk: 'FRASES (RUEDA)',
   rotate: 'GIRAR (ESCONDITE)',
   spin: 'RULETA',
+  emote: 'EMOTE',
 };
 
 export const DEFAULT_BINDINGS: Record<Action, string> = {
@@ -30,6 +31,7 @@ export const DEFAULT_BINDINGS: Record<Action, string> = {
   talk: 'KeyT',
   rotate: 'KeyR',
   spin: 'KeyQ',
+  emote: 'KeyG',
 };
 
 /** Teclas alternativas fijas (siempre activas además de la asignación). */

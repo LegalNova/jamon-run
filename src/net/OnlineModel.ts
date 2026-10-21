@@ -88,6 +88,8 @@ export class OnlineModel implements GameModel {
     for (const r of start.roster) {
       const c = new SimChar({ id: r.id, team: r.team, name: r.name, look: r.look, human: r.human, x: 0, y: 0 });
       c.horse = r.horse ?? 0;
+      c.cos = r.cos ?? {};
+      c.streak = r.streak ?? 0;
       c.spinsLeft = HYPE.personalSpins;
       this.chars.push(c);
       this.byId.set(c.id, c);
@@ -402,6 +404,10 @@ export class OnlineModel implements GameModel {
 
   say(phrase: number): void {
     net.sendMsg({ t: 'say', p: phrase });
+  }
+
+  emote(): void {
+    net.sendMsg({ t: 'emo' });
   }
 
   /** Envía la entrada solo si ha cambiado, y como mucho 15 veces por segundo. */

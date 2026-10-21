@@ -16,10 +16,19 @@ class_name = "Room"
 name = "MATCHMAKER"
 class_name = "Matchmaker"
 
+# Perfil de cada jugador: lonchas, nivel, misiones y cosméticos.
+[[durable_objects.bindings]]
+name = "PROFILE"
+class_name = "Profile"
+
 # En el plan gratuito los Durable Objects tienen que usar SQLite.
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Room", "Matchmaker"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["Profile"]
 
 [observability]
 enabled = true

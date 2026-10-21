@@ -3,6 +3,7 @@
  * El servidor es autoritativo: el cliente solo envía entradas y peticiones.
  */
 import type { Difficulty } from './balance';
+import type { ApplyResult, Equipped } from './economy';
 import type { Look } from './look';
 import type { MapId } from './maps';
 import type { MapScale } from './mapScale';
@@ -34,6 +35,9 @@ export interface LobbyPlayer {
   /** Voto de modo y caballo de la carrera (-1 = sin elegir). */
   vote: ModeId | null;
   horse: number;
+  /** Cosméticos puestos (comprobados por el servidor) y racha de minijuegos. */
+  cos: Equipped;
+  streak: number;
 }
 
 export type RoomPhase = 'lobby' | 'reveal' | 'playing' | 'results';
@@ -45,6 +49,8 @@ export interface RosterNet {
   look: Look;
   human: boolean;
   horse?: number;
+  cos?: Equipped;
+  streak?: number;
 }
 
 export interface ResultNet {
@@ -67,6 +73,8 @@ export type ServerMsg =
   | { t: 's'; s: SnapshotNet; m?: MeNet }
   | { t: 'results'; mode: ModeId; winner: Team; champion: number; horse: number; timePlayed: number; duration: number; mapId: MapId; entries: ResultNet[] }
   | { t: 'pong'; c: number; ts: number }
+  /** Lo que has ganado en la partida (lo calcula el servidor). */
+  | { t: 'reward'; res: ApplyResult }
   | { t: 'error'; msg: string };
 
 /** Datos privados de tu personaje (para el HUD y la predicción). */
@@ -110,7 +118,7 @@ export interface SnapshotNet {
 // ------------------------------------------------------------------ cliente → servidor
 
 export type ClientMsg =
-  | { t: 'hello'; pid: string; look: Look }
+  | { t: 'hello'; pid: string; look: Look; acct?: string }
   | { t: 'look'; look: Look }
   | { t: 'ready'; v: boolean }
   | { t: 'settings'; s: Partial<RoomSettings> }
@@ -120,6 +128,7 @@ export type ClientMsg =
   | { t: 'vote'; m: ModeId }
   | { t: 'horse'; h: number }
   | { t: 'say'; p: number }
+  | { t: 'emo' }
   | { t: 'ping'; c: number }
   | { t: 'leave' };
 

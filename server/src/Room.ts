@@ -21,7 +21,9 @@ import {
 import { Sim } from '../../shared/sim/Sim';
 import type { HeldInput, ModeId, Team } from '../../shared/sim/types';
 import type { Look } from '../../shared/look';
+import { profileOf, validAccount } from './accounts';
 import type { Env } from './index';
+import type { Equipped, PlayReport } from '../../shared/economy';
 
 interface Player {
   id: number;
@@ -40,6 +42,10 @@ interface Player {
   qCount: number;
   vote: ModeId | null;
   horse: number;
+  /** Cuenta (perfil con lonchas) y cosméticos que lleva. */
+  acct: string;
+  cos: Equipped;
+  streak: number;
   /** Control de ritmo de mensajes de entrada. */
   winStart: number;
   winCount: number;
@@ -87,7 +93,7 @@ export class Room extends DurableObject<Env> {
         return;
       }
       if (!player) {
-        if (msg.t === 'hello') player = this.join(server, msg.pid, msg.look);
+        if (msg.t === 'hello') player = this.join(server, msg.pid, msg.look, msg.acct);
         return;
       }
       this.onMessage(player, msg);
@@ -102,7 +108,7 @@ export class Room extends DurableObject<Env> {
 
   // ------------------------------------------------------------------ jugadores
 
-  private join(ws: WebSocket, pid: string, rawLook: unknown): Player | null {
+  private join(ws: WebSocket, pid: string, rawLook: unknown, acct?: string): Player | null {
     pid = String(pid ?? '').slice(0, 64);
     let p = this.players.find((x) => x.pid === pid) ?? null;
     if (p) {
@@ -142,12 +148,16 @@ export class Room extends DurableObject<Env> {
         qCount: 0,
         vote: null,
         horse: -1,
+        acct: validAccount(acct) ? acct : '',
+        cos: {},
+        streak: 0,
         winStart: 0,
         winCount: 0,
       };
       this.players.push(p);
     }
     if (this.hostId < 0 || !this.players.some((x) => x.id === this.hostId && x.connected)) this.hostId = p.id;
+    void this.loadCosmetics(p);
     this.send(ws, { t: 'welcome', you: p.id, code: this.code });
     // Si hay partida en marcha y este jugador está en ella, vuelve a recibirla.
     if (this.sim && (this.phase === 'playing' || this.phase === 'reveal') && this.sim.byId.has(p.id)) this.sendStart(p);
@@ -223,6 +233,9 @@ export class Room extends DurableObject<Env> {
         if (wheel.includes(msg.p)) sim.say(p.id, msg.p);
         break;
       }
+      case 'emo':
+        this.sim?.emote(p.id);
+        break;
       case 'vote':
         if (this.phase === 'lobby' && validMode(msg.m)) {
           p.vote = msg.m;
@@ -318,7 +331,17 @@ export class Room extends DurableObject<Env> {
     let bi = Math.floor(Math.random() * 20);
     this.roster = slots.map((s, i) => {
       const team: Team = i < nChasers ? 'chaser' : 'escapist';
-      if (s.human) return { id: s.human.id, name: s.human.name, team, look: s.human.look, human: true, horse: s.human.horse >= 0 ? s.human.horse : Math.floor(Math.random() * HYPE.horses.length) };
+      if (s.human)
+        return {
+          id: s.human.id,
+          name: s.human.name,
+          team,
+          look: s.human.look,
+          human: true,
+          horse: s.human.horse >= 0 ? s.human.horse : Math.floor(Math.random() * HYPE.horses.length),
+          cos: s.human.cos,
+          streak: s.human.streak,
+        };
       const name = botName(bi++);
       return { id: botId++, name: `${name}`, team, look: randomLook(name), human: false, horse: Math.floor(Math.random() * HYPE.horses.length) };
     });
@@ -461,6 +484,7 @@ export class Room extends DurableObject<Env> {
     };
     for (const p of this.players) if (p.ws) this.send(p.ws, msg);
     void this.recordRank(sim);
+    void this.payRewards(sim);
     this.stopLoop(false);
     this.sim = null;
     this.phase = 'lobby';
@@ -472,7 +496,7 @@ export class Room extends DurableObject<Env> {
   // ------------------------------------------------------------------ envío
 
   private lobbyPlayers(): LobbyPlayer[] {
-    return this.players.map((p) => ({ id: p.id, name: p.name, look: p.look, ready: p.ready, host: p.id === this.hostId, connected: p.connected, vote: p.vote, horse: p.horse }));
+    return this.players.map((p) => ({ id: p.id, name: p.name, look: p.look, ready: p.ready, host: p.id === this.hostId, connected: p.connected, vote: p.vote, horse: p.horse, cos: p.cos, streak: p.streak }));
   }
 
   private broadcastLobby(): void {
@@ -497,6 +521,44 @@ export class Room extends DurableObject<Env> {
       ws.send(data);
     } catch {
       /* conexión cerrada */
+    }
+  }
+
+  /** Cosméticos de verdad (los que tiene en su perfil), no lo que diga el navegador. */
+  private async loadCosmetics(p: Player): Promise<void> {
+    if (!p.acct) return;
+    try {
+      const r = await profileOf(this.env, p.acct).equipped(p.acct);
+      p.cos = r.eq;
+      p.streak = r.streak;
+      this.broadcastLobby();
+    } catch {
+      /* sin perfil: sin cosméticos */
+    }
+  }
+
+  /** Lonchas, experiencia y misiones de cada persona: lo calcula el servidor. */
+  private async payRewards(sim: Sim): Promise<void> {
+    for (const p of this.players) {
+      const c = sim.byId.get(p.id);
+      if (!c || !p.acct || !p.connected) continue;
+      const won = sim.mode === 'bomba' ? sim.champion === c.id : c.team === sim.winner;
+      const s = c.stats;
+      const report: PlayReport = {
+        kind: 'match',
+        mode: sim.mode,
+        won,
+        coins: s.coins,
+        medals: s.medals,
+        stats: { passes: s.passes, survive: Math.floor(s.timeSurvived), infections: s.infections, finds: s.finds, rescues: s.rescues, hits: s.hits },
+      };
+      try {
+        const res = await profileOf(this.env, p.acct).report(p.acct, report, true);
+        p.streak = res.profile.mgStreak;
+        if (p.ws) this.send(p.ws, { t: 'reward', res: { lonchas: res.lonchas, xp: res.xp, notices: res.notices } });
+      } catch {
+        /* no es crítico */
+      }
     }
   }
 

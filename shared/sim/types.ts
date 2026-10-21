@@ -112,6 +112,7 @@ export type SimEvent =
   | { t: 'medal'; id: number; m: string }
   | { t: 'roulette'; kind: 'global' | 'me'; id: number; r: number }
   | { t: 'effect'; e: string; on: boolean; id: number }
+  | { t: 'emote'; id: number; e: string }
   | { t: 'race'; w: number }
   | { t: 'raceEnd'; w: number };
 
@@ -125,6 +126,9 @@ export interface RosterEntry {
   human: boolean;
   /** Caballo votado para la carrera (0..3). */
   horse?: number;
+  /** Cosméticos (solo visuales). */
+  cos?: import('../economy').Equipped;
+  streak?: number;
 }
 
 /** Lo que una entidad necesita del mundo para actualizarse (Sim o predicción del cliente). */

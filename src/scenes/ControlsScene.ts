@@ -77,8 +77,8 @@ export class ControlsScene extends Phaser.Scene {
     text(this, VIEW_W / 2, 14, 'CONTROLES', { scale: 2, color: UI.focusLight });
     text(this, VIEW_W / 2, 30, 'ELIGE UNA ACCIÓN Y PULSA ENTER PARA CAMBIAR SU TECLA', { color: UI.muted });
     this.menu = new Menu();
-    this.rows = ACTIONS.map((a, i) => this.menu.add(new KeyRow(this, VIEW_W / 2, 44 + i * 15, a, (r) => this.startCapture(r))));
-    const by = 44 + ACTIONS.length * 15 + 4;
+    this.rows = ACTIONS.map((a, i) => this.menu.add(new KeyRow(this, VIEW_W / 2, 44 + i * 14, a, (r) => this.startCapture(r))));
+    const by = 44 + ACTIONS.length * 14 + 4;
     this.menu.add(new Button(this, VIEW_W / 2 - 52, by, 'RESTABLECER', () => {
       resetBindings();
       this.rows.forEach((r) => r.refresh());

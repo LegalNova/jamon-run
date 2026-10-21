@@ -89,6 +89,12 @@ export class SimChar {
   /** Premios de la ruleta. */
   invisible = 0;
   dashFree = 0;
+  /** Cosméticos (solo se ven) y racha de minijuegos. */
+  cos: import('../economy').Equipped = {};
+  streak = 0;
+  emoteCd = 0;
+  /** Ventaja elegida tras ganar el minijuego del Parón. */
+  perk: 'speed' | 'shield' | 'cooldown' | null = null;
   /** Tiradas personales de la ruleta que le quedan y caballo al que apostó. */
   spinsLeft = 0;
   horse = 0;

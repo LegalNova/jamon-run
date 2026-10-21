@@ -184,6 +184,8 @@ export class Sim implements SimCtx, BotWorld {
   private add(r: RosterEntry, x: number, y: number): void {
     const c = new SimChar({ id: r.id, team: r.team, name: r.name, look: r.look, human: r.human, x, y });
     c.horse = r.horse ?? Math.floor(Math.random() * HYPE.horses.length);
+    c.cos = r.cos ?? {};
+    c.streak = r.streak ?? 0;
     this.chars.push(c);
     this.byId.set(c.id, c);
     if (!r.human) this.brains.set(c.id, new BotBrain(c, this));
@@ -232,6 +234,16 @@ export class Sim implements SimCtx, BotWorld {
     }
   }
 
+  /** Emote equipado (tecla G): se ve encima de la cabeza. */
+  emote(id: number): boolean {
+    const c = this.byId.get(id);
+    const e = c?.cos.emote;
+    if (!c || !e || c.emoteCd > 0) return false;
+    c.emoteCd = 2;
+    this.events.push({ t: 'emote', id, e });
+    return true;
+  }
+
   /** Un personaje dice una frase (bocadillo + voz en el cliente). */
   say(id: number, p: number): boolean {
     const c = this.byId.get(id);
@@ -278,6 +290,10 @@ export class Sim implements SimCtx, BotWorld {
     } else if (e.t === 'last') {
       this.sayMaybe(e.id, 1, [24]);
     }
+    // Los bots también presumen con su emote.
+    const who = e.t === 'trap' || e.t === 'infect' ? e.a : e.t === 'pass' ? e.from : -1;
+    const b = who >= 0 ? this.byId.get(who) : undefined;
+    if (b && !b.human && Math.random() < 0.3) this.emote(who);
   }
 
   /** Da monedas (con combo si encadenas acciones). */
@@ -428,6 +444,7 @@ export class Sim implements SimCtx, BotWorld {
     this.dangerTimer -= dt;
     for (const c of this.chars) {
       c.sayCd -= dt;
+      c.emoteCd -= dt;
       const it = this.intentFor(c, dt);
       c.update(dt, this, it);
     }

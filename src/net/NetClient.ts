@@ -2,6 +2,7 @@ import { NET } from '../../shared/balance';
 import type { Look } from '../../shared/look';
 import type { ClientMsg, LobbyPlayer, RoomPhase, RoomSettings, ServerMsg } from '../../shared/protocol';
 import { playerId, profile } from '../config/profile';
+import { account } from './account';
 
 export type NetStatus = 'idle' | 'connecting' | 'open' | 'reconnecting' | 'closed' | 'full';
 
@@ -117,7 +118,7 @@ class NetClient {
       this.status = 'open';
       this.dropAt = 0;
       this.lastMsgAt = performance.now();
-      this.sendMsg({ t: 'hello', pid: tabPid(), look: profile.look });
+      this.sendMsg({ t: 'hello', pid: tabPid(), look: profile.look, acct: playerId() });
       this.sendPing();
       if (this.pingTimer) clearInterval(this.pingTimer);
       this.pingTimer = setInterval(() => {
@@ -186,6 +187,9 @@ class NetClient {
         break;
       case 'start':
         this.pendingStart = { msg, at: performance.now() };
+        break;
+      case 'reward':
+        account.applyReward(msg.res);
         break;
       case 'lobby':
         this.lobby = { code: msg.code, phase: msg.phase, players: msg.players, settings: msg.settings, you: msg.you };

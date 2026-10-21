@@ -31,6 +31,7 @@ const PAD_ACTIONS: Record<Action, number[]> = {
   talk: [PAD.BACK],
   rotate: [PAD.Y],
   spin: [PAD.LT],
+  emote: [],
 };
 
 type NavDir = 'up' | 'down' | 'left' | 'right';

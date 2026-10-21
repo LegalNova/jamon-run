@@ -15,6 +15,9 @@ import { MapSelectScene } from './scenes/MapSelectScene';
 import { ModeSelectScene } from './scenes/ModeSelectScene';
 import { TutorialScene } from './scenes/TutorialScene';
 import { RecordsScene } from './scenes/RecordsScene';
+import { ShopScene } from './scenes/ShopScene';
+import { MissionsScene } from './scenes/MissionsScene';
+import { ToastScene } from './scenes/ToastScene';
 import { MenuScene } from './scenes/MenuScene';
 import { OptionsScene } from './scenes/OptionsScene';
 import { PauseScene } from './scenes/PauseScene';
@@ -64,6 +67,10 @@ const game = new Phaser.Game({
     CharacterScene,
     OnlineScene,
     LobbyScene,
+    ShopScene,
+    MissionsScene,
+    // siempre la última: va encima de todo
+    ToastScene,
   ],
 });
 
