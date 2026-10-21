@@ -20,6 +20,7 @@ export class BootScene extends Phaser.Scene {
     buildCosmeticArt(this);
     this.buildBackground();
     this.buildFullscreenIcon();
+    document.getElementById('loading')?.remove();
     this.scene.launch('Toast');
     this.scene.start('Title');
   }

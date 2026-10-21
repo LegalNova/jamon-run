@@ -419,30 +419,44 @@ export function levelFor(xp: number): { level: number; cur: number; next: number
  * y toca un minijuego. Duraciones de cada fase (s) y ventajas del ganador.
  */
 export const PARON = {
-  at: [0.3, 0.7],
-  /** Jamón Bomba no tiene tiempo fijo: segundos de partida. */
-  bombaAt: [45, 110],
-  phases: { break: 1.8, slot: 2.8, howto: 2.2, podium: 4.5, count: 3 },
+  /** Cuántos Parones de minijuegos según lo que elija el anfitrión (uno cada ~45-60 s). */
+  levels: { no: 0, pocos: 1, normal: 2, muchos: 3 },
+  /** Con partidas largas (más de longFrom s) sale uno más. */
+  longFrom: 150,
+  /** Ni muy al principio ni muy al final, y separados entre sí. */
+  firstAt: 25,
+  minGap: 30,
+  endMargin: 15,
+  /** Jamón Bomba no tiene tiempo fijo: segundos en los que puede saltar cada Parón. */
+  bombaEvery: 55,
+  /** Probabilidad de "Parón Doble" (dos minijuegos seguidos rápidos). */
+  doubleChance: 0.2,
+  /** Eventos aparte (como mucho uno de cada por partida): probabilidad de que salgan. */
+  eventChance: { ruleta: 0.65, carrera: 0.5 },
+  phases: { break: 1.5, slot: 2.4, howto: 2, podium: 4, podiumQuick: 2.2, count: 3 },
   /** Ventajas para lo que queda de partida: +10% velocidad, escudo, recarga un 20% más rápida. */
   perkSpeed: 1.1,
   perkCooldown: 0.8,
   /** Reacciones (1-5) por segundo como mucho. */
   reactionsPerSec: 3,
+  /** Cuántos minijuegos recientes recuerda la bolsa para no repetir entre partidas. */
+  bagMemory: 4,
 } as const;
+
+export type ParonLevel = keyof typeof PARON.levels;
 
 /** Valores de los minijuegos (pagos, cuotas, duraciones...). */
 export const MG = {
+  /** EVENTO RULETA: rojo, negro o verde (0 y 00). Se apuesta con lonchas; lo decide el servidor. */
   ruleta: {
-    chips: 100,
-    chip: 10,
-    bet: 11,
-    spin: 6,
-    show: 2,
-    /** Pagos (a 1): rojo/negro, par/impar, mitades 1 a 1; verde (0 o 00) 17 a 1; número 35 a 1. */
-    pay: { rojo: 1, negro: 1, verde: 17, par: 1, impar: 1, bajo: 1, alto: 1, numero: 35 },
-    /** Lonchas extra por fichas ganadas (si acabas con más de las que tenías). */
-    bonusRate: 0.5,
-    bonusCap: 150,
+    bet: 10,
+    spin: 5,
+    show: 3,
+    pay: { rojo: 1, negro: 1, verde: 17 },
+    amounts: [10, 50, 100],
+    step: 10,
+    /** Apuesta máxima (también lo que significa "TODO" si tienes más). */
+    maxBet: 500,
   },
   caballos: {
     pick: 8,
@@ -456,6 +470,8 @@ export const MG = {
     cheer: 0.0022,
     cheerPerSec: 7,
   },
+  atrapa: { duration: 15, lanes: 5, every: 0.42 },
+  cuenta: { rounds: 3, show: 4.5, pick: 2.6, reveal: 1.2, min: [5, 7, 9], max: [8, 11, 14] },
   corta: { cuts: 5, duration: 15, period: 1.3, periodStep: 0.16, cooldown: 0.35 },
   torre: { duration: 20, period: 1.5, minPeriod: 0.42, step: 0.07, perfect: 0.04 },
   tira: { duration: 15, beat: 0.5, window: 0.09, near: 0.18, winAt: 1 },

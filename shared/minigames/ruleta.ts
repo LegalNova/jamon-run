@@ -1,139 +1,117 @@
-/** RULETA AMERICANA: 38 casillas (0 y 00 verdes). Se apuesta con fichas; gana quien acabe con más. */
+/**
+ * EVENTO RULETA (no es un minijuego): rojo, negro o verde (0 y 00).
+ * Una apuesta por persona, en lonchas. El número lo decide el servidor.
+ */
 import { MG } from '../balance';
-import { MgDef, MgKey, MgPlayer, MiniGame, MgExtra, rank } from './types';
+import { MgDef, MgKey, MgPlayer, MgResult, MiniGame, MgExtra } from './types';
 
 const R = MG.ruleta;
 /** Orden real de la rueda americana. */
 export const WHEEL = ['0', '28', '9', '26', '30', '11', '7', '20', '32', '17', '5', '22', '34', '15', '3', '24', '36', '13', '1', '00', '27', '10', '25', '29', '12', '8', '19', '31', '18', '6', '21', '33', '16', '4', '23', '35', '14', '2'];
 export const RED = new Set([1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36]);
-export const BETS = ['rojo', 'negro', 'verde', 'par', 'impar', 'bajo', 'alto', 'numero'] as const;
-export type BetId = (typeof BETS)[number];
-export const BET_NAMES: Record<BetId, string> = { rojo: 'ROJO', negro: 'NEGRO', verde: 'VERDE 0/00', par: 'PAR', impar: 'IMPAR', bajo: '1-18', alto: '19-36', numero: 'TU NÚMERO' };
+export const COLORS = ['rojo', 'negro', 'verde'] as const;
+export type Color = (typeof COLORS)[number];
 
-export function pocketColor(p: string): 'verde' | 'rojo' | 'negro' {
+export function pocketColor(p: string): Color {
   if (p === '0' || p === '00') return 'verde';
   return RED.has(Number(p)) ? 'rojo' : 'negro';
 }
 
-export function betWins(b: BetId, pocket: string, lucky: number): boolean {
-  const green = pocket === '0' || pocket === '00';
-  const n = Number(pocket);
-  switch (b) {
-    case 'rojo':
-      return !green && RED.has(n);
-    case 'negro':
-      return !green && !RED.has(n);
-    case 'verde':
-      return green;
-    case 'par':
-      return !green && n % 2 === 0;
-    case 'impar':
-      return !green && n % 2 === 1;
-    case 'bajo':
-      return !green && n <= 18;
-    case 'alto':
-      return !green && n >= 19;
-    case 'numero':
-      return !green && n === lucky;
-  }
+/** Lo que te llevas (positivo) o pierdes (negativo). */
+export function payout(c: Color | null, amount: number, pocket: string): number {
+  if (!c || amount <= 0) return 0;
+  return pocketColor(pocket) === c ? amount * R.pay[c] : -amount;
 }
 
-interface P {
-  chips: number;
-  bets: Record<string, number>;
-  sel: number;
-  lucky: number;
-  last: BetId[];
-  won: number;
-}
-
-class Ruleta implements MiniGame {
+export class RuletaEvento implements MiniGame {
   readonly id = 'ruleta' as const;
-  readonly duration = R.bet + R.spin + R.show;
   t = 0;
   done = false;
-  private ps = new Map<number, P>();
-  private pocket = '';
-  private resolved = false;
-  private botNext = new Map<number, number>();
+  pocket = '';
+  spinStart = -1;
+  private bets = new Map<number, { c: Color | null; a: number }>();
+  private botAt = new Map<number, number>();
 
-  constructor(private players: MgPlayer[], private rng: () => number, private extra: MgExtra) {
+  constructor(private players: MgPlayer[], private rng: () => number, private extra: MgExtra, private opts: { auto: boolean; balance: (id: number) => number }) {
     for (const p of players) {
-      this.ps.set(p.id, { chips: R.chips, bets: {}, sel: 0, lucky: 1 + Math.floor(rng() * 36), last: [], won: 0 });
-      this.botNext.set(p.id, 1 + rng() * 3);
+      this.bets.set(p.id, { c: null, a: 0 });
+      this.botAt.set(p.id, 1.5 + rng() * 6);
     }
   }
 
-  input(id: number, k: MgKey, t: number): void {
-    const p = this.ps.get(id);
-    if (!p || t >= R.bet) return;
-    if (k === 'l') p.sel = (p.sel + BETS.length - 1) % BETS.length;
-    else if (k === 'r') p.sel = (p.sel + 1) % BETS.length;
-    else if (k === 'a') {
-      if (p.chips < R.chip) return;
-      const b = BETS[p.sel];
-      p.chips -= R.chip;
-      p.bets[b] = (p.bets[b] ?? 0) + R.chip;
-      p.last.push(b);
-    } else if (k === 'b') {
-      const b = p.last.pop();
-      if (!b) return;
-      p.bets[b] -= R.chip;
-      if (p.bets[b] <= 0) delete p.bets[b];
-      p.chips += R.chip;
-    }
+  get duration(): number {
+    return this.spinStart < 0 ? R.bet + R.spin + R.show : this.spinStart + R.spin + R.show;
   }
+
+  /** Tu apuesta: color y cantidad (se puede cambiar mientras dura la barra). */
+  bet(id: number, c: unknown, a: unknown): void {
+    const b = this.bets.get(id);
+    if (!b || this.t >= R.bet) return;
+    const color = COLORS.includes(c as Color) ? (c as Color) : null;
+    const max = Math.max(0, Math.min(R.maxBet, Math.floor(this.opts.balance(id))));
+    const amount = Math.max(0, Math.min(max, Math.floor(Number(a) || 0)));
+    b.c = amount > 0 ? color : null;
+    b.a = b.c ? amount : 0;
+  }
+
+  betOf(id: number): { c: Color | null; a: number } {
+    return this.bets.get(id) ?? { c: null, a: 0 };
+  }
+
+  /** El número (lo pone el servidor o, offline, la respuesta del servidor). */
+  setPocket(p: string): void {
+    if (this.pocket || !WHEEL.includes(p)) return;
+    this.pocket = p;
+    this.spinStart = Math.max(R.bet, this.t);
+    this.extra.rouletteHistory.unshift(p);
+    this.extra.rouletteHistory.length = Math.min(10, this.extra.rouletteHistory.length);
+  }
+
+  input(_id: number, _k: MgKey, _t: number): void {}
 
   tick(dt: number): void {
     this.t += dt;
-    // "No va más": el número sale del azar del servidor cuando se cierran las apuestas.
-    if (!this.pocket && this.t >= R.bet) this.pocket = WHEEL[Math.floor(this.rng() * WHEEL.length)];
-    if (!this.resolved && this.t >= R.bet + R.spin) {
-      this.resolved = true;
-      for (const p of this.ps.values()) {
-        for (const [b, amount] of Object.entries(p.bets)) {
-          if (betWins(b as BetId, this.pocket, p.lucky)) {
-            const win = amount * (R.pay[b as BetId] + 1);
-            p.chips += win;
-            p.won += win;
-          }
-        }
-      }
-      this.extra.rouletteHistory.unshift(this.pocket);
-      this.extra.rouletteHistory.length = Math.min(10, this.extra.rouletteHistory.length);
+    if (!this.pocket && this.t >= R.bet && this.opts.auto) this.setPocket(WHEEL[Math.floor(this.rng() * WHEEL.length)]);
+    // Si el número no llega (sin conexión), se acaba sin apuestas.
+    if (!this.pocket && this.t >= R.bet + 6) {
+      for (const b of this.bets.values()) b.c = null;
+      this.setPocket(WHEEL[Math.floor(this.rng() * WHEEL.length)]);
     }
-    if (this.t >= this.duration) this.done = true;
+    if (this.spinStart >= 0 && this.t >= this.spinStart + R.spin + R.show) this.done = true;
   }
 
   state(): Record<string, unknown> {
     const ps: Record<number, unknown> = {};
-    for (const [id, p] of this.ps) ps[id] = { c: p.chips, b: p.bets, s: p.sel, n: p.lucky, w: this.resolved ? p.won : 0 };
-    return { t: this.t, ps, pk: this.t >= R.bet ? this.pocket : '', h: this.extra.rouletteHistory.slice(0, 10), res: this.resolved };
+    for (const [id, b] of this.bets) if (b.c) ps[id] = { c: b.c, a: b.a };
+    return { t: this.t, ps, pk: this.pocket, ss: this.spinStart, h: this.extra.rouletteHistory.slice(0, 10) };
   }
 
-  results() {
-    const bonus = (id: number) => Math.min(R.bonusCap, Math.floor(Math.max(0, this.ps.get(id)!.chips - R.chips) * R.bonusRate));
-    return rank(this.players, (id) => this.ps.get(id)!.chips, (id) => `${this.ps.get(id)!.chips} FICHAS`, true, bonus);
+  results(): MgResult[] {
+    return this.players
+      .map((p) => {
+        const b = this.betOf(p.id);
+        const d = this.pocket ? payout(b.c, b.a, this.pocket) : 0;
+        return { id: p.id, score: d, place: d > 0 ? 0 : 3, won: d > 0, label: !b.c ? 'SIN APUESTA' : d > 0 ? `+${d} LONCHAS` : `${d} LONCHAS`, bonus: 0 };
+      })
+      .sort((a, b) => b.score - a.score);
   }
 
   bot(id: number, dt: number): MgKey[] {
-    if (this.t >= R.bet - 0.5) return [];
-    const n = (this.botNext.get(id) ?? 0) - dt;
-    this.botNext.set(id, n);
-    if (n > 0) return [];
-    this.botNext.set(id, 0.5 + this.rng() * 1.5);
-    const p = this.ps.get(id)!;
-    if (Object.keys(p.bets).length >= 3 || p.chips < R.chip) return [];
-    const want = this.rng() < 0.6 ? Math.floor(this.rng() * 2) : Math.floor(this.rng() * BETS.length);
-    return p.sel === want ? ['a', 'a'] : [p.sel < want ? 'r' : 'l'];
+    const left = (this.botAt.get(id) ?? 0) - dt;
+    this.botAt.set(id, left);
+    if (left > 0 || this.t >= R.bet || this.bets.get(id)!.c) return [];
+    this.botAt.set(id, 99);
+    const r = this.rng();
+    this.bet(id, r < 0.45 ? 'rojo' : r < 0.9 ? 'negro' : 'verde', R.amounts[Math.floor(this.rng() * R.amounts.length)]);
+    return [];
   }
 }
 
 export const RULETA: MgDef = {
   id: 'ruleta',
-  name: 'RULETA AMERICANA',
-  howto: ['← → ELIGE ROJO, NEGRO, VERDE...', 'ESPACIO APUESTA · E QUITA FICHA'],
-  keys: '← → · ESPACIO · E',
+  name: 'EVENTO RULETA',
+  howto: ['ROJO, NEGRO O VERDE', 'ELIGE CUÁNTO Y A QUÉ COLOR'],
+  keys: '1 ROJO · 2 NEGRO · 3 VERDE',
   color: 0x63c74d,
-  create: (players, rng, extra) => new Ruleta(players, rng, extra),
+  create: (players, rng, extra) => new RuletaEvento(players, rng, extra, { auto: true, balance: () => 200 }),
 };

@@ -5,7 +5,9 @@ import type { ModeNet } from '../../shared/modes/types';
 import type { Prop } from '../../shared/props';
 import type { SimChar } from '../../shared/sim/Char';
 import { Sim } from '../../shared/sim/Sim';
-import { MgKey, Paron, ParonNet } from '../../shared/minigames';
+import { MgBag, MgId, MgKey, Paron, ParonNet } from '../../shared/minigames';
+import { MG, ParonLevel } from '../../shared/balance';
+import { WHEEL } from '../../shared/minigames/ruleta';
 import { account } from '../net/account';
 import type { HeldInput, MatchState, ModeId, PickupType, RosterEntry, SimEvent, Team } from '../../shared/sim/types';
 import type { Difficulty } from '../config/balance';
@@ -70,6 +72,8 @@ export interface GameModel {
   /** Tiempo del minijuego, suave (para dibujar cuchillos, flechas...). */
   paronT(): number;
   mgInput(k: MgKey): void;
+  /** Evento Ruleta: tu apuesta (color y cantidad). */
+  rouletteBet(c: string, a: number): void;
   react(e: number): void;
   /** Reacciones (1-5) recibidas desde la última vez. */
   drainReactions(): { id: number; e: number }[];
@@ -77,9 +81,33 @@ export interface GameModel {
 
 /** Recompensas de un minijuego offline (con topes en el servidor). */
 export function reportMinigame(pr: Paron, myId: number): void {
-  const r = pr.results.find((x) => x.id === myId);
-  if (!r) return;
-  void account.reportOffline({ kind: 'minigame', mg: pr.def.id, won: r.won, place: r.place, coins: r.bonus, stats: { perfects: r.perfects ?? 0 } });
+  if (pr.kind === 'ruleta') return; // la ruleta se paga en el servidor al girar
+  for (const round of pr.rounds) {
+    const r = round.results.find((x) => x.id === myId);
+    if (!r) continue;
+    if (pr.kind === 'carrera') {
+      if (r.bonus > 0) void account.reportOffline({ kind: 'event', won: r.won, coins: r.bonus });
+    } else void account.reportOffline({ kind: 'minigame', mg: round.mg, won: r.won, place: r.place, coins: r.bonus, stats: { perfects: r.perfects ?? 0 } });
+  }
+}
+
+const BAG_KEY = 'jamonrun.mgbag.v1';
+
+/** Bolsa de minijuegos offline: se guarda en el navegador para no repetir entre partidas. */
+export function loadBag(): MgBag {
+  try {
+    return new MgBag(Math.random, JSON.parse(localStorage.getItem(BAG_KEY) ?? '{}'));
+  } catch {
+    return new MgBag(Math.random);
+  }
+}
+
+export function saveBag(b: MgBag): void {
+  try {
+    localStorage.setItem(BAG_KEY, JSON.stringify({ bag: b.bag, recent: b.recent }));
+  } catch {
+    /* sin almacenamiento */
+  }
 }
 
 /** Partida contra bots en el propio navegador. */
@@ -89,9 +117,12 @@ export class OfflineModel implements GameModel {
   private pr: Paron | null = null;
   private reactions: { id: number; e: number }[] = [];
   private extra = { rouletteHistory: [] as string[] };
+  private bag = loadBag();
+  private used = new Set<MgId>();
+  private asked = false;
 
   constructor(
-    o: { mode: ModeId; mapId: MapId; scale: MapScale; duration: number; difficulty: Difficulty; roster: RosterEntry[] },
+    o: { mode: ModeId; mapId: MapId; scale: MapScale; duration: number; difficulty: Difficulty; roster: RosterEntry[]; paron?: ParonLevel },
     readonly playerId: number,
   ) {
     this.sim = new Sim(o);
@@ -155,8 +186,20 @@ export class OfflineModel implements GameModel {
       // ¡Parón! La partida no avanza: se juega el minijuego con los bots.
       if (!this.pr) {
         const players = this.sim.chars.map((c) => ({ id: c.id, name: c.name, team: c.team, bot: c.id !== this.playerId || !c.human }));
-        this.pr = new Paron(players, Math.random, { extra: this.extra });
+        const slot = this.sim.current ?? { kind: 'mini' as const, double: false, at: 0 };
+        const queue = slot.kind === 'mini' ? this.bag.draw(slot.double ? 2 : 1, this.used) : undefined;
+        saveBag(this.bag);
+        this.asked = false;
+        this.pr = new Paron(players, Math.random, {
+          kind: slot.kind,
+          queue,
+          extra: this.extra,
+          // Offline, el número de la ruleta lo saca el servidor (con tu apuesta).
+          rouletteAuto: false,
+          balance: (id) => (id === this.playerId ? (account.offline ? 0 : account.lonchas) : 200),
+        });
       }
+      this.askPocket();
       this.pr.tick(dt);
       // Los bots también reaccionan.
       if ((this.pr.phase === 'podium' || this.pr.phase === 'play') && Math.random() < dt * 1.2) {
@@ -174,6 +217,23 @@ export class OfflineModel implements GameModel {
   }
 
   lastParon: Paron | null = null;
+
+  /** Evento Ruleta offline: al cerrarse las apuestas, el servidor saca el número y paga. */
+  private askPocket(): void {
+    const ru = this.pr?.ruleta;
+    if (!ru || this.asked || ru.t < MG.ruleta.bet) return;
+    this.asked = true;
+    const b = ru.betOf(this.playerId);
+    if (!b.c || b.a <= 0) {
+      ru.setPocket(WHEEL[Math.floor(Math.random() * WHEEL.length)]);
+      return;
+    }
+    void account.roulette(b.c, b.a).then((pk) => ru.setPocket(pk ?? WHEEL[Math.floor(Math.random() * WHEEL.length)]));
+  }
+
+  rouletteBet(c: string, a: number): void {
+    this.pr?.ruleta?.bet(this.playerId, c, a);
+  }
 
   paron(): ParonNet | null {
     return this.pr ? this.pr.net() : null;

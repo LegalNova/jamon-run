@@ -18,6 +18,9 @@ export interface MgHost {
   net(): ParonNet | null;
   t(): number;
   input(k: MgKey): void;
+  /** Evento Ruleta: apuesta y saldo. */
+  bet(c: string, a: number): void;
+  balance(): number;
   react(e: number): void;
   reactions(): { id: number; e: number }[];
   info(id: number): (MgPlayerInfo & { cos?: Equipped }) | undefined;
@@ -62,7 +65,29 @@ export class MinigameScene extends Phaser.Scene {
     this.perkCards = null;
   }
 
+  /** Toque/clic en la pantalla: lo traduce a teclas del minijuego o elige ventaja. */
+  private onTap(p: Phaser.Input.Pointer): void {
+    const net = this.host.net();
+    if (!net) return;
+    const x = p.x / this.cameras.main.zoom - this.W / 2;
+    const y = p.y / this.cameras.main.zoom - this.H / 2;
+    if (net.ph === 'play' && net.st && this.view) {
+      const keys = this.view.onPointer(x, y, net.st);
+      for (const k of keys) {
+        this.host.input(k);
+        this.view.onKey(k, net.st);
+      }
+    } else if (net.ph === 'podium' && net.perk?.[this.host.myId] && y > 70) {
+      const mine = net.perk[this.host.myId];
+      const i = Math.max(0, Math.min(2, Math.round(x / 108) + 1));
+      for (let k = 0; k < (i - mine[0] + 3) % 3; k++) this.host.input('r');
+      this.host.input('a');
+      audio.play('click');
+    }
+  }
+
   create(): void {
+    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => this.onTap(p));
     const { Z, W, H } = viewSize(this);
     this.W = W;
     this.H = H;
@@ -104,7 +129,8 @@ export class MinigameScene extends Phaser.Scene {
     this.clearPhase();
     this.frame.setVisible(ph !== 'break' && ph !== 'count');
     const def = mgDef(net.mg);
-    this.header.setText(fontText(ph === 'break' || ph === 'slot' ? '¡PARÓN DOPAMINA!' : def.name)).setTint(def.color);
+    const breakTitle = net.k === 'ruleta' ? '¡EVENTO RULETA!' : net.k === 'carrera' ? '¡CARRERA DE CABALLOS!' : net.n > 1 ? '¡PARÓN DOBLE!' : '¡PARÓN DOPAMINA!';
+    this.header.setText(fontText(ph === 'break' || ph === 'slot' ? breakTitle : net.n > 1 ? `${def.name} · ${net.i + 1}/${net.n}` : def.name)).setTint(def.color);
     const add = <T extends Phaser.GameObjects.GameObject>(o: T): T => {
       this.phaseC.add(o);
       return o;
@@ -122,10 +148,12 @@ export class MinigameScene extends Phaser.Scene {
           const r = add(this.add.rectangle((Math.random() - 0.5) * this.W, (Math.random() - 0.5) * this.H, 12, 12, cols[i % cols.length]));
           this.tweens.add({ targets: r, x: r.x * 1.8, y: r.y + 120 + Math.random() * 120, angle: Math.random() * 360, alpha: 0, duration: 900 + Math.random() * 500, ease: 'Quad.easeIn' });
         }
-        const t = add(text(this, 0, -10, '¡PARÓN!', { scale: 6, color: 0xfee761 }));
+        const big = net.k === 'ruleta' ? 'RULETA' : net.k === 'carrera' ? 'CARRERA' : net.n > 1 ? '¡DOBLE!' : '¡PARÓN!';
+        const t = add(text(this, 0, -10, big, { scale: 6, color: net.k === 'ruleta' ? 0x63c74d : 0xfee761 }));
         t.setScale(0);
         this.tweens.add({ targets: t, scale: 6, duration: 420, ease: 'Bounce.easeOut' });
-        add(text(this, 0, 34, 'TODO SE CONGELA... ¡MINIJUEGO!', { color: UI.text }));
+        const sub = net.k === 'ruleta' ? 'TODO SE PARA: ¡HAGAN JUEGO!' : net.k === 'carrera' ? 'ELIGE TU CABALLO GANADOR' : net.n > 1 ? 'DOS MINIJUEGOS SEGUIDOS' : 'TODO SE CONGELA... ¡MINIJUEGO!';
+        add(text(this, 0, 34, sub, { color: UI.text }));
         break;
       }
       case 'slot': {
@@ -176,7 +204,16 @@ export class MinigameScene extends Phaser.Scene {
       }
       case 'play':
         this.view?.destroy();
-        this.view = createView(net.mg, { scene: this, root: this.root, myId: this.host.myId, info: (id) => this.host.info(id), t: () => this.host.t() });
+        this.view = createView(net.mg, {
+          scene: this,
+          root: this.root,
+          myId: this.host.myId,
+          info: (id) => this.host.info(id),
+          t: () => this.host.t(),
+          bet: (c, a) => this.host.bet(c, a),
+          balance: () => this.host.balance(),
+          send: (keys) => keys.forEach((k) => this.host.input(k)),
+        });
         audio.play('go');
         break;
       case 'podium':
@@ -315,8 +352,12 @@ export class MinigameScene extends Phaser.Scene {
       if (net.ph === 'play' && net.st) this.view?.onKey(k, net.st);
       if (net.ph === 'podium') audio.play('hover');
     }
-    // reacciones 1-5 (🔥😂😱👏🍖)
-    for (let e = 0; e < 5; e++) if (input.keyPressed(`Digit${e + 1}`) || input.keyPressed(`Numpad${e + 1}`)) this.host.react(e);
+    // números: en la ruleta, 1-3 son los colores; si no, reacciones 1-5 (🔥😂😱👏🍖)
+    for (let e = 0; e < 5; e++) {
+      if (!(input.keyPressed(`Digit${e + 1}`) || input.keyPressed(`Numpad${e + 1}`))) continue;
+      if (net.ph === 'play' && this.view?.onDigit(e + 1)) continue;
+      this.host.react(e);
+    }
     for (const r of this.host.reactions()) this.reaction(r.id, r.e);
   }
 }

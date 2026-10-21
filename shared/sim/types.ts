@@ -114,7 +114,7 @@ export type SimEvent =
   | { t: 'effect'; e: string; on: boolean; id: number }
   | { t: 'emote'; id: number; e: string }
   /** ¡PARÓN! La partida se congela para un minijuego. */
-  | { t: 'paron' }
+  | { t: 'paron'; k: 'mini' | 'ruleta' | 'carrera'; d: boolean }
   | { t: 'resume' }
   ;
 

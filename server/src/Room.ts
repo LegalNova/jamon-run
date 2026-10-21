@@ -19,9 +19,9 @@ import {
   STATES,
 } from '../../shared/protocol';
 import { Sim } from '../../shared/sim/Sim';
-import { MgKey, Paron } from '../../shared/minigames';
+import { MgBag, MgId, MgKey, Paron } from '../../shared/minigames';
 import { secureRandom } from '../../shared/minigames/rng';
-import { PARON } from '../../shared/balance';
+import { MG, PARON } from '../../shared/balance';
 import type { HeldInput, ModeId, Team } from '../../shared/sim/types';
 import type { Look } from '../../shared/look';
 import { profileOf, validAccount } from './accounts';
@@ -68,12 +68,17 @@ export class Room extends DurableObject<Env> {
   private nextId = 1;
   private hostId = -1;
   private phase: RoomPhase = 'lobby';
-  private settings: RoomSettings = { mode: 'voto', hunters: 0, mapId: 'forest', paron: true, duration: 120, botFill: 8, difficulty: 'normal', isPublic: false };
+  private settings: RoomSettings = { mode: 'voto', hunters: 0, mapId: 'forest', paron: 'normal', duration: 120, botFill: 8, difficulty: 'normal', isPublic: false };
   /** Minijuego del Parón en marcha (la partida está congelada). */
   private paron: Paron | null = null;
   private paronTickAt = 0;
   private paronPhase = '';
   private rouletteHistory: string[] = [];
+  /** Bolsa barajada de minijuegos (se acuerda entre partidas de esta sala). */
+  private bag = new MgBag(secureRandom);
+  private usedThisMatch = new Set<MgId>();
+  private balances = new Map<number, number>();
+  private settled = false;
   private sim: Sim | null = null;
   private roster: RosterNet[] = [];
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -262,6 +267,10 @@ export class Room extends DurableObject<Env> {
         pr.input(p.id, msg.k as MgKey, Math.min(0.15, p.ping / 2000) - ahead);
         break;
       }
+      case 'rb':
+        // Apuesta del Evento Ruleta: color y cantidad (el servidor la limita a tu saldo).
+        this.paron?.ruleta?.bet(p.id, msg.c, msg.a);
+        break;
       case 're': {
         // Reacciones (🔥😂😱👏🍖) durante el Parón: llegan a todos.
         const now = Date.now();
@@ -326,7 +335,7 @@ export class Room extends DurableObject<Env> {
     if (s.mode === 'voto' || validMode(s.mode)) this.settings.mode = s.mode;
     if (typeof s.hunters === 'number' && (NET.huntersOptions as readonly number[]).includes(s.hunters)) this.settings.hunters = s.hunters;
     if (s.mapId && MAPS.some((m) => m.id === s.mapId)) this.settings.mapId = s.mapId;
-    if (typeof s.paron === 'boolean') this.settings.paron = s.paron;
+    if (typeof s.paron === 'string' && s.paron in PARON.levels) this.settings.paron = s.paron;
     if (typeof s.duration === 'number' && (NET.durationOptions as readonly number[]).includes(s.duration)) this.settings.duration = s.duration;
     if (typeof s.botFill === 'number' && (NET.botFillOptions as readonly number[]).includes(s.botFill)) this.settings.botFill = s.botFill;
     if (s.difficulty && s.difficulty in BALANCE.ai) this.settings.difficulty = s.difficulty;
@@ -377,6 +386,7 @@ export class Room extends DurableObject<Env> {
     const scale = scaleFor(total, this.settings.mapId);
     this.sim = new Sim({ mode, mapId: this.settings.mapId, scale, duration: this.settings.duration, difficulty: this.settings.difficulty, roster: this.roster, paron: this.settings.paron });
     this.paron = null;
+    this.usedThisMatch = new Set();
     // El modo puede cambiar los equipos (Jamón Bomba: todos contra todos).
     for (const r of this.roster) r.team = this.sim.byId.get(r.id)?.team ?? r.team;
     for (const p of humans) this.sim.setHeld(p.id, { mx: 0, my: 0, sprint: false });
@@ -472,7 +482,18 @@ export class Room extends DurableObject<Env> {
   private tickParon(sim: Sim, now: number): void {
     if (!this.paron) {
       const players = sim.chars.map((c) => ({ id: c.id, name: c.name, team: c.team, bot: !this.players.some((p) => p.id === c.id && p.connected) }));
-      this.paron = new Paron(players, secureRandom, { extra: { rouletteHistory: this.rouletteHistory } });
+      const slot = sim.current ?? { kind: 'mini' as const, double: false, at: 0 };
+      const queue = slot.kind === 'mini' ? this.bag.draw(slot.double ? 2 : 1, this.usedThisMatch) : undefined;
+      this.balances = new Map();
+      this.settled = false;
+      if (slot.kind === 'ruleta') void this.loadBalances(sim);
+      this.paron = new Paron(players, secureRandom, {
+        kind: slot.kind,
+        queue,
+        extra: { rouletteHistory: this.rouletteHistory },
+        // Los bots apuestan "de mentira"; las personas, con sus lonchas de verdad.
+        balance: (id) => (players.find((p) => p.id === id)?.bot ? 200 : (this.balances.get(id) ?? 0)),
+      });
       this.paronPhase = '';
     }
     const pr = this.paron;
@@ -487,6 +508,11 @@ export class Room extends DurableObject<Env> {
       const raw = JSON.stringify({ t: 'mg', p: pr.net() });
       for (const p of this.players) if (p.ws) this.sendRaw(p.ws, raw);
     }
+    // Evento Ruleta: se cobra/paga justo cuando se ve el resultado.
+    if (pr.kind === 'ruleta' && !this.settled && pr.ruleta && pr.ruleta.pocket && pr.ruleta.t >= pr.ruleta.spinStart + MG.ruleta.spin) {
+      this.settled = true;
+      void this.settleRoulette(pr);
+    }
     if (pr.done) {
       void this.payParon(pr);
       sim.resume(pr.chosenPerks());
@@ -494,17 +520,51 @@ export class Room extends DurableObject<Env> {
     }
   }
 
-  /** Lonchas por el minijuego (las calcula el servidor). */
-  private async payParon(pr: Paron): Promise<void> {
-    for (const r of pr.results) {
-      const p = this.players.find((x) => x.id === r.id);
-      if (!p || !p.acct || !p.connected) continue;
+  private async loadBalances(sim: Sim): Promise<void> {
+    for (const p of this.players) {
+      if (!p.acct || !p.connected || !sim.byId.has(p.id)) continue;
       try {
-        const res = await profileOf(this.env, p.acct).report(p.acct, { kind: 'minigame', mg: pr.def.id, won: r.won, place: r.place, coins: r.bonus, stats: { perfects: r.perfects ?? 0 } }, true);
-        p.streak = res.profile.mgStreak;
-        if (p.ws) this.send(p.ws, { t: 'reward', res: { lonchas: res.lonchas, xp: res.xp, notices: res.notices } });
+        this.balances.set(p.id, await profileOf(this.env, p.acct).balance(p.acct));
+      } catch {
+        /* sin saldo: no puede apostar */
+      }
+    }
+  }
+
+  private async settleRoulette(pr: Paron): Promise<void> {
+    const ru = pr.ruleta;
+    if (!ru) return;
+    for (const p of this.players) {
+      const b = ru.betOf(p.id);
+      if (!p.acct || !b.c || b.a <= 0) continue;
+      try {
+        const res = await profileOf(this.env, p.acct).roulette(p.acct, b.c, b.a, ru.pocket);
+        if (p.ws) this.send(p.ws, { t: 'reward', res: { lonchas: res.delta, xp: 0, notices: res.notices } });
       } catch {
         /* no es crítico */
+      }
+    }
+  }
+
+  /** Lonchas por los minijuegos y la carrera (las calcula el servidor). */
+  private async payParon(pr: Paron): Promise<void> {
+    if (pr.kind === 'ruleta') return;
+    for (const round of pr.rounds) {
+      for (const r of round.results) {
+        const p = this.players.find((x) => x.id === r.id);
+        if (!p || !p.acct || !p.connected) continue;
+        if (pr.kind === 'carrera' && r.bonus <= 0) continue;
+        try {
+          const report: PlayReport =
+            pr.kind === 'carrera'
+              ? { kind: 'event', won: r.won, coins: r.bonus }
+              : { kind: 'minigame', mg: round.mg, won: r.won, place: r.place, coins: r.bonus, stats: { perfects: r.perfects ?? 0 } };
+          const res = await profileOf(this.env, p.acct).report(p.acct, report, true);
+          p.streak = res.profile.mgStreak;
+          if (p.ws) this.send(p.ws, { t: 'reward', res: { lonchas: res.lonchas, xp: res.xp, notices: res.notices } });
+        } catch {
+          /* no es crítico */
+        }
       }
     }
   }

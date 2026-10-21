@@ -143,6 +143,10 @@ export class OnlineModel implements GameModel {
     net.sendMsg({ t: 're', e });
   }
 
+  rouletteBet(c: string, a: number): void {
+    net.sendMsg({ t: 'rb', c, a });
+  }
+
   drainReactions(): { id: number; e: number }[] {
     const r = this.reactions;
     this.reactions = [];

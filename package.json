@@ -1,8 +1,8 @@
 {
-  "name": "jamon-run",
+  "name": "jamongus",
   "private": true,
   "version": "1.0.0",
-  "description": "JAMÓN RUN - pilla-pilla por equipos top-down en pixel art",
+  "description": "JAMONGUS - pilla-pilla a jamonazos en pixel art, online y móvil",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -10,13 +10,13 @@
     "dev": "concurrently -k -n cliente,servidor -c cyan,magenta \"vite\" \"wrangler dev --port 8787 --ip 127.0.0.1\"",
     "dev:client": "vite",
     "dev:server": "wrangler dev --port 8787 --ip 127.0.0.1",
-    "build": "tsc --noEmit && tsc --noEmit -p server/tsconfig.json && vite build",
+    "build": "node scripts/gen-assets.mjs && tsc --noEmit && tsc --noEmit -p server/tsconfig.json && vite build",
     "preview": "vite preview",
     "deploy": "npm run build && wrangler deploy",
     "check:maps": "esbuild scripts/check-maps.ts --bundle --platform=node --log-level=warning | node",
     "desktop": "vite build && npx --yes electron@33.4.11 .",
     "desktop:test": "vite build && JAMON_SMOKE_TEST=1 npx --yes electron@33.4.11 .",
-    "package": "vite build && npx --yes @electron/packager@18.4.4 . \"Jamon Run\" --out=release --overwrite --electron-version=33.4.11 --ignore=^/src --ignore=^/scripts --ignore=^/release --ignore=^/node_modules --ignore=^/\\.claude --ignore=^/index\\.html --ignore=^/tsconfig\\.json --ignore=^/vite\\.config\\.ts --ignore=^/README\\.md"
+    "package": "vite build && npx --yes @electron/packager@18.4.4 . \"JAMONGUS\" --out=release --overwrite --electron-version=33.4.11 --ignore=^/src --ignore=^/scripts --ignore=^/release --ignore=^/node_modules --ignore=^/\\.claude --ignore=^/index\\.html --ignore=^/tsconfig\\.json --ignore=^/vite\\.config\\.ts --ignore=^/README\\.md"
   },
   "dependencies": {
     "phaser": "3.90.0"

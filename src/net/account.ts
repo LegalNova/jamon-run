@@ -4,6 +4,7 @@
  */
 import type { ApplyResult, CosCat, Notice, PlayReport, Profile } from '../../shared/economy';
 import { playerId } from '../config/profile';
+import { MG } from '../../shared/balance';
 
 type Listener = () => void;
 type NoticeListener = (n: Notice) => void;
@@ -85,6 +86,15 @@ class Account {
   async claim(mission: string): Promise<number> {
     const r = await this.post<{ profile: Profile; amount: number }>({ op: 'claim', mission });
     return r?.amount ?? 0;
+  }
+
+  /** Evento Ruleta sin sala: el servidor saca el número y paga. Devuelve el número (o null). */
+  async roulette(color: string, amount: number): Promise<string | null> {
+    const r = await this.post<{ profile: Profile; pocket: string; delta: number; notices: Notice[] }>({ op: 'roulette', color, amount });
+    if (!r) return null;
+    // Las notificaciones se enseñan cuando la rueda se para.
+    setTimeout(() => this.notify(r.notices), MG.ruleta.spin * 1000);
+    return r.pocket;
   }
 
   /** Partida o minijuego sin servidor: el perfil le aplica topes. */

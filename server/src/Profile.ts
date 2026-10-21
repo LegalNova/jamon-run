@@ -11,7 +11,9 @@ import {
   newProfile,
   PlayReport,
   Profile as ProfileData,
+  Notice,
   refresh,
+  settleRoulette,
 } from '../../shared/economy';
 import type { Env } from './index';
 
@@ -24,7 +26,7 @@ export class Profile extends DurableObject<Env> {
   private seed = '';
 
   private async load(seed: string): Promise<ProfileData> {
-    if (!this.data) this.data = (await this.ctx.storage.get<ProfileData>('p')) ?? newProfile();
+    if (!this.data) this.data = (await this.ctx.storage.get<ProfileData>('p')) ?? (await this.fromLegacy(seed)) ?? newProfile();
     this.seed = seed || this.seed;
     refresh(this.data, this.seed);
     return this.data;
@@ -32,6 +34,24 @@ export class Profile extends DurableObject<Env> {
 
   private async save(): Promise<void> {
     if (this.data) await this.ctx.storage.put('p', this.data);
+  }
+
+  /** Perfil de antes del cambio de nombre (Worker jamon-run), si existía. */
+  private async fromLegacy(seed: string): Promise<ProfileData | null> {
+    if (!this.env.LEGACY || !seed) return null;
+    try {
+      const res = await this.env.LEGACY.fetch(`https://legacy/api/legacy-profile?id=${encodeURIComponent(seed)}`);
+      if (!res.ok) return null;
+      const data = (await res.json()) as { profile: ProfileData | null };
+      return data.profile && data.profile.v === 1 ? data.profile : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Solo lectura (para el traspaso): null si nunca se usó. */
+  async peek(): Promise<ProfileData | null> {
+    return (await this.ctx.storage.get<ProfileData>('p')) ?? null;
   }
 
   async get(seed: string): Promise<ProfileData> {
@@ -71,6 +91,18 @@ export class Profile extends DurableObject<Env> {
     const amount = claimMission(p, String(id));
     await this.save();
     return { profile: p, amount };
+  }
+
+  /** Evento Ruleta: el número ya lo ha decidido el servidor. */
+  async roulette(seed: string, color: string, amount: number, pocket: string): Promise<{ profile: ProfileData; delta: number; notices: Notice[] }> {
+    const p = await this.load(seed);
+    const r = settleRoulette(p, color, amount, pocket);
+    await this.save();
+    return { profile: p, ...r };
+  }
+
+  async balance(seed: string): Promise<number> {
+    return (await this.load(seed)).lonchas;
   }
 
   /** Una partida o minijuego. online = lo ha calculado el servidor de la sala. */

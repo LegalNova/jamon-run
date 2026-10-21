@@ -3,7 +3,7 @@
  * Configuración y lógica pura del perfil: recompensas, nivel, misiones diarias, tienda y cosméticos.
  * La aplica el servidor (Durable Object de cada jugador); el cliente solo la usa para mostrarla.
  */
-import { levelFor } from './balance';
+import { levelFor, MG } from './balance';
 import type { ModeId } from './sim/types';
 
 export const ECONOMY = {
@@ -239,7 +239,8 @@ export function dailyMissions(seed: string, day: string): MissionState[] {
 
 /** Lo que un jugador ha hecho en una partida o minijuego (lo calcula el servidor online). */
 export interface PlayReport {
-  kind: 'match' | 'minigame';
+  /** event = Evento Carrera (solo cobras si aciertas). */
+  kind: 'match' | 'minigame' | 'event';
   mode?: ModeId;
   mg?: string;
   won: boolean;
@@ -329,7 +330,10 @@ export function applyReport(p: Profile, r: PlayReport, offline: boolean, now = D
   let lonchas = 0;
   let xp = 0;
   const stats: Partial<Record<StatKey, number>> = { ...(r.stats ?? {}) };
-  if (r.kind === 'match') {
+  if (r.kind === 'event') {
+    lonchas = Math.min(E.minigame.bonusCap, Math.max(0, Math.floor(r.coins ?? 0)));
+    xp = 10;
+  } else if (r.kind === 'match') {
     const coins = Math.max(0, Math.min(offline ? E.offline.coinsCap : 5000, Math.floor(r.coins ?? 0)));
     lonchas = Math.min(offline ? E.offline.matchCap : E.match.cap, Math.round(coins * E.match.coinRate) + E.match.play + (r.won ? E.match.win : 0));
     xp = E.xp.play + (r.won ? E.xp.win : 0) + coins * E.xp.perCoin + (r.medals?.length ?? 0) * 15;
@@ -390,6 +394,25 @@ export function applyReport(p: Profile, r: PlayReport, offline: boolean, now = D
   addXp(p, xp, notices);
   progressMissions(p, stats, notices);
   return { lonchas, xp: Math.round(xp), notices };
+}
+
+/**
+ * Evento Ruleta: una apuesta (rojo 1:1, negro 1:1, verde 17:1). El número lo decide el servidor.
+ * Nunca deja el saldo por debajo de 0 (si te quedas a 0, lonchas de rescate).
+ */
+export function settleRoulette(p: Profile, color: string, amount: number, pocket: string, now = Date.now()): { delta: number; notices: Notice[] } {
+  const notices: Notice[] = [];
+  const pay = (MG.ruleta.pay as Record<string, number>)[color];
+  const bet = Math.max(0, Math.min(MG.ruleta.maxBet, p.lonchas, Math.floor(amount) || 0));
+  if (!pay || bet <= 0) return { delta: 0, notices };
+  const green = pocket === '0' || pocket === '00';
+  const red = new Set([1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36]).has(Number(pocket));
+  const won = color === 'verde' ? green : color === 'rojo' ? !green && red : !green && !red;
+  const delta = won ? bet * pay : -bet;
+  p.lonchas += delta;
+  notices.push({ k: 'lonchas', n: delta, why: 'RULETA' });
+  grantRescue(p, notices, now);
+  return { delta, notices };
 }
 
 /** Regalo diario: más lonchas si vienes días seguidos. */

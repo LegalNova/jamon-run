@@ -1,4 +1,5 @@
 import { BALANCE, Difficulty } from './balance';
+import { PARON, ParonLevel } from '../../shared/balance';
 
 export type Action = 'up' | 'down' | 'left' | 'right' | 'action' | 'sprint' | 'special' | 'pause' | 'talk' | 'rotate' | 'spin' | 'emote';
 
@@ -52,6 +53,10 @@ export interface Settings {
   voices: boolean;
   /** Menos temblores de pantalla y destellos. */
   reduceFx: boolean;
+  /** Parones por partida contra bots. */
+  paron: ParonLevel;
+  /** Calidad gráfica: auto (baja sola si va lento), alta o baja. */
+  quality: 'auto' | 'alta' | 'baja';
   /** Vibración del mando. */
   rumble: boolean;
   duration: number;
@@ -70,6 +75,8 @@ function defaults(): Settings {
     fullscreen: false,
     voices: true,
     reduceFx: false,
+    paron: 'normal',
+    quality: 'auto',
     rumble: true,
     duration: BALANCE.match.defaultDuration,
     chasers: BALANCE.match.defaultChasers,
@@ -96,6 +103,8 @@ function load(): Settings {
       fullscreen: !!s.fullscreen,
       voices: s.voices === undefined ? true : !!s.voices,
       reduceFx: !!s.reduceFx,
+      paron: s.paron && s.paron in PARON.levels ? s.paron : d.paron,
+      quality: s.quality === 'alta' || s.quality === 'baja' ? s.quality : 'auto',
       rumble: s.rumble === undefined ? true : !!s.rumble,
       duration: (m.durationOptions as readonly number[]).includes(s.duration as number) ? (s.duration as number) : d.duration,
       chasers: Math.round(clamp(s.chasers, m.minChasers, m.maxChasers, d.chasers)),

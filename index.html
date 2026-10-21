@@ -2,16 +2,51 @@
 <html lang="es">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>JAMÓN RUN</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <title>JAMONGUS</title>
+    <meta name="description" content="JAMONGUS: pilla-pilla a jamonazos en pixel art. 4 modos, Parón con minijuegos y online con hasta 20 amigos. En el navegador, móvil o escritorio." />
+    <meta name="theme-color" content="#1a1428" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="JAMONGUS" />
+    <meta property="og:description" content="Pilla-pilla a jamonazos en pixel art. Juega online con tus amigos." />
+    <meta property="og:url" content="https://jamongus.jamon-run.workers.dev/" />
+    <meta property="og:image" content="https://jamongus.jamon-run.workers.dev/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="https://jamongus.jamon-run.workers.dev/og.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="JAMONGUS" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" type="image/png" href="icon-192.png" />
+    <link rel="apple-touch-icon" href="apple-touch-icon.png" />
     <style>
-      html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #0d0b14; overflow: hidden; }
-      #game { position: fixed; inset: 0; background: #0d0b14; }
+      html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #0d0b14; overflow: hidden; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; overscroll-behavior: none; }
+      /* El juego respeta las zonas seguras (notch, barra inferior). */
+      #game { position: fixed; top: env(safe-area-inset-top); right: env(safe-area-inset-right); bottom: env(safe-area-inset-bottom); left: env(safe-area-inset-left); background: #0d0b14; }
       #game canvas { image-rendering: pixelated; image-rendering: crisp-edges; outline: none; }
+      #loading { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; background: #0d0b14; color: #fee761; font: bold 28px monospace; letter-spacing: 4px; z-index: 5; }
+      #loading img { width: 96px; height: 96px; image-rendering: pixelated; animation: bob 0.8s ease-in-out infinite alternate; }
+      #loading small { color: #8b9bb4; font-size: 12px; letter-spacing: 2px; }
+      @keyframes bob { from { transform: translateY(-6px) rotate(-6deg); } to { transform: translateY(6px) rotate(6deg); } }
+      /* Móvil en vertical: aviso de girar. */
+      #rotate { display: none; position: fixed; inset: 0; z-index: 10; background: #0d0b14; color: #f4f0e8; font: bold 18px monospace; flex-direction: column; align-items: center; justify-content: center; gap: 22px; text-align: center; }
+      #rotate .phone { width: 46px; height: 80px; border: 5px solid #fee761; border-radius: 9px; animation: turn 1.6s ease-in-out infinite; }
+      @keyframes turn { 0%, 30% { transform: rotate(0deg); } 60%, 100% { transform: rotate(-90deg); } }
+      @media (orientation: portrait) and (pointer: coarse) { #rotate { display: flex; } }
+      #name-input { position: fixed; display: none; z-index: 8; font: bold 18px monospace; text-transform: uppercase; text-align: center; background: #1a1428; color: #fee761; border: 3px solid #feae34; outline: none; padding: 6px; box-sizing: border-box; }
     </style>
   </head>
   <body>
     <div id="game"></div>
+    <div id="loading"><img src="icon-192.png" alt="" />JAMONGUS<small>CARGANDO...</small></div>
+    <div id="rotate"><div class="phone"></div>GIRA EL MÓVIL<br /><small style="color:#8b9bb4">JAMONGUS SE JUEGA EN HORIZONTAL</small></div>
+    <input id="name-input" maxlength="12" autocomplete="off" autocapitalize="characters" spellcheck="false" />
+    <script>
+      if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+    </script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

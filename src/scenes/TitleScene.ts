@@ -8,7 +8,7 @@ import { applyFullscreen, Backdrop, fadeIn, fadeTo } from './common';
 
 /** Crea el logo "JAMÓN RUN" con letras sueltas que ondulan. */
 export function createLogo(scene: Phaser.Scene, cx: number, cy: number, scale: number): Phaser.GameObjects.BitmapText[] {
-  const word = 'JAMÓN RUN';
+  const word = 'JAMONGUS';
   const letters: Phaser.GameObjects.BitmapText[] = [];
   const widths = word.split('').map((c) => (c === ' ' ? 3 : c === 'Ó' || c === 'M' || c === 'N' || c === 'A' || c === 'J' || c === 'R' || c === 'U' ? 6 : 6));
   const total = widths.reduce((a, b) => a + b, 0) * scale;

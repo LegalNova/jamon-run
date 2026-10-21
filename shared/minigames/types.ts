@@ -5,7 +5,7 @@
  */
 import type { Team } from '../sim/types';
 
-export type MgId = 'ruleta' | 'caballos' | 'corta' | 'torre' | 'tira' | 'trilero' | 'reflejos' | 'ritmo';
+export type MgId = 'ruleta' | 'caballos' | 'corta' | 'torre' | 'tira' | 'trilero' | 'reflejos' | 'ritmo' | 'atrapa' | 'cuenta';
 
 export interface MgPlayer {
   id: number;

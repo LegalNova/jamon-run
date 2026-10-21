@@ -49,6 +49,14 @@ export class OptionsScene extends Phaser.Scene {
       ['DIFICULTAD', () => DIFF_NAMES[settings.difficulty], (d) => { settings.difficulty = DIFFS[(DIFFS.indexOf(settings.difficulty) + d + 3) % 3]; }],
       ['PANTALLA COMPLETA', () => (settings.fullscreen ? 'SÍ' : 'NO'), () => { settings.fullscreen = !settings.fullscreen; applyFullscreen(); }],
       ['VOCES', () => (settings.voices ? 'SÍ' : 'NO'), () => { settings.voices = !settings.voices; }],
+      ['PARONES (BOTS)', () => ({ no: 'NINGUNO', pocos: 'POCOS', normal: 'NORMAL', muchos: 'MUCHOS' })[settings.paron], (d) => {
+        const o = ['no', 'pocos', 'normal', 'muchos'] as const;
+        settings.paron = o[(o.indexOf(settings.paron) + d + 4) % 4];
+      }],
+      ['CALIDAD', () => ({ auto: 'AUTOMÁTICA', alta: 'ALTA', baja: 'BAJA' })[settings.quality], (d) => {
+        const o = ['auto', 'alta', 'baja'] as const;
+        settings.quality = o[(o.indexOf(settings.quality) + d + 3) % 3];
+      }],
       ['REDUCIR EFECTOS', () => (settings.reduceFx ? 'SÍ' : 'NO'), () => { settings.reduceFx = !settings.reduceFx; }],
       ['VIBRACIÓN MANDO', () => (settings.rumble ? 'SÍ' : 'NO'), () => { settings.rumble = !settings.rumble; }],
       ['DURACIÓN PARTIDA', () => fmtTime(settings.duration), (d) => {
@@ -64,9 +72,9 @@ export class OptionsScene extends Phaser.Scene {
       }],
     ];
     rows.forEach(([label, get, change], i) => {
-      this.menu.add(new OptionRow(this, VIEW_W / 2, 34 + i * 16, label, get, (d) => { change(d); saveSettings(); }));
+      this.menu.add(new OptionRow(this, VIEW_W / 2, 30 + i * 15, label, get, (d) => { change(d); saveSettings(); }));
     });
-    this.menu.add(new Button(this, VIEW_W / 2, 34 + rows.length * 16 + 8, 'VOLVER', () => this.back(), 90, 16));
+    this.menu.add(new Button(this, VIEW_W / 2, 30 + rows.length * 15 + 6, 'VOLVER', () => this.back(), 90, 16));
     text(this, VIEW_W / 2, VIEW_H - 26, '↑↓ ELEGIR · ← → CAMBIAR · ESC VOLVER', { color: UI.muted });
     text(this, VIEW_W / 2, VIEW_H - 14,
       this.from === 'Pause' ? 'DIFICULTAD, DURACIÓN Y EQUIPOS: EN LA PRÓXIMA PARTIDA' : 'LOS CAMBIOS SE GUARDAN SOLOS',

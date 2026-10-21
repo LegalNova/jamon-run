@@ -1,4 +1,4 @@
-# JAMÓN RUN
+# JAMONGUS
 
 Pilla-pilla por equipos en vista cenital, en pixel art, con **4 modos de juego**: Pilla Jamón, Infección, Jamón Bomba y Escondite Jamonero. Se juega solo contra bots o **online con hasta 20 personas**, y todo va cargado de dopamina:
 
@@ -54,7 +54,7 @@ npx wrangler login     # una sola vez
 npm run deploy         # compila y despliega
 ```
 
-Al terminar, wrangler muestra la URL pública (`https://jamon-run.<tu-subdominio>.workers.dev`).
+Al terminar, wrangler muestra la URL pública (`https://jamongus.<tu-subdominio>.workers.dev`).
 
 **Despliegue automático:** `.github/workflows/deploy.yml` compila y despliega en cada push a `main`. Necesita dos secretos en el repositorio:
 
@@ -71,7 +71,7 @@ El plan gratuito de Cloudflare da para jugar de sobra con amigos: unas 2 horas d
 
 ```bash
 npm run desktop       # compila y abre el juego en una ventana nativa
-npm run package       # crea la app en release/ (p. ej. "Jamon Run.app" en macOS)
+npm run package       # crea la app en release/ (p. ej. "JAMONGUS.app" en macOS)
 npm run desktop:test  # prueba automática: abre el juego oculto y comprueba que no hay errores (macOS/Linux)
 ```
 

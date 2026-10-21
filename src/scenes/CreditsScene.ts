@@ -7,7 +7,7 @@ import { Button, Menu, text, UI } from '../ui/widgets';
 import { Backdrop, fadeIn, fadeTo } from './common';
 
 const LINES: [string, number][] = [
-  ['JAMÓN RUN', 0xfee761],
+  ['JAMONGUS', 0xfee761],
   ['', 0],
   ['DISEÑO Y PROGRAMACIÓN', 0x7cc8ff],
   ['HECHO A MANO CON PHASER 3 + TYPESCRIPT', 0xf4f0e8],

@@ -1,6 +1,8 @@
 import { COS_CATS, CosCat, PlayReport, StatKey } from '../../shared/economy';
 import { validCode } from '../../shared/protocol';
 import { validMode } from '../../shared/modes/rules';
+import { WHEEL } from '../../shared/minigames/ruleta';
+import { secureRandom } from '../../shared/minigames/rng';
 import { Matchmaker } from './Matchmaker';
 import { Profile } from './Profile';
 import { Room } from './Room';
@@ -13,6 +15,10 @@ export interface Env {
   MATCHMAKER: DurableObjectNamespace<Matchmaker>;
   PROFILE: DurableObjectNamespace<Profile>;
   ASSETS: Fetcher;
+  /** Worker antiguo (perfiles de antes del cambio de nombre). */
+  LEGACY?: Fetcher;
+  /** Solo en el Worker antiguo: adónde redirigir. */
+  REDIRECT_TO?: string;
 }
 
 
@@ -22,7 +28,7 @@ const STAT_KEYS: StatKey[] = ['matches', 'wins', 'mgWins', 'mgPlayed', 'passes',
 function cleanReport(raw: unknown): PlayReport | null {
   if (!raw || typeof raw !== 'object') return null;
   const r = raw as Record<string, unknown>;
-  const kind = r.kind === 'minigame' ? 'minigame' : r.kind === 'match' ? 'match' : null;
+  const kind = r.kind === 'minigame' ? 'minigame' : r.kind === 'match' ? 'match' : r.kind === 'event' ? 'event' : null;
   if (!kind) return null;
   const stats: Partial<Record<StatKey, number>> = {};
   const rs = (r.stats && typeof r.stats === 'object' ? r.stats : {}) as Record<string, unknown>;
@@ -46,7 +52,7 @@ const json = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
 
 /**
- * Worker de JAMÓN RUN:
+ * Worker de JAMONGUS:
  *  - /api/quick  → código de una sala pública con sitio (partida rápida)
  *  - /api/new    → código nuevo para una sala privada
  *  - /api/rank   → ranking mundial por modo
@@ -57,6 +63,16 @@ export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
     const mm = () => env.MATCHMAKER.get(env.MATCHMAKER.idFromName('global'));
+
+    // URL antigua: todo redirige a JAMONGUS, salvo el traspaso de perfiles (solo por service binding).
+    if (env.REDIRECT_TO) {
+      if (url.pathname === '/api/legacy-profile') {
+        const id = url.searchParams.get('id');
+        if (!validAccount(id)) return json({ error: 'Cuenta no válida' }, 400);
+        return json({ profile: await profileOf(env, id).peek() });
+      }
+      return Response.redirect(env.REDIRECT_TO + url.pathname + url.search, 301);
+    }
 
     if (url.pathname === '/api/quick') return json({ code: await mm().quick() });
     if (url.pathname === '/api/new') return json({ code: await mm().newCode() });
@@ -90,6 +106,12 @@ export default {
         }
         case 'claim':
           return json(await p.claim(id, String(body.mission ?? '')));
+        case 'roulette': {
+          // Ruleta sin sala (offline): el número lo saca el servidor, no el navegador.
+          const pocket = WHEEL[Math.floor(secureRandom() * WHEEL.length)];
+          const r = await p.roulette(id, String(body.color), Number(body.amount) || 0, pocket);
+          return json({ profile: r.profile, delta: r.delta, notices: r.notices, pocket });
+        }
         case 'offline': {
           const r = cleanReport(body.report);
           if (!r) return json({ error: 'Informe no válido' }, 400);

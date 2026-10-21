@@ -2,7 +2,7 @@
  * Protocolo de red (WebSocket, JSON compacto).
  * El servidor es autoritativo: el cliente solo envía entradas y peticiones.
  */
-import type { Difficulty } from './balance';
+import type { Difficulty, ParonLevel } from './balance';
 import type { ApplyResult, Equipped } from './economy';
 import type { MgKey, ParonNet } from './minigames';
 import type { Look } from './look';
@@ -18,8 +18,8 @@ export interface RoomSettings {
   /** Cazadores al empezar (buscadores / infectados / azules); 0 = automático. */
   hunters: number;
   mapId: MapId;
-  /** Parón Dopamina activado. */
-  paron: boolean;
+  /** Parones por partida: no, pocos, normal o muchos. */
+  paron: ParonLevel;
   duration: number;
   /** Rellenar con bots hasta este número de personajes (0 = sin bots). */
   botFill: number;
@@ -135,6 +135,8 @@ export type ClientMsg =
   /** Tecla en el minijuego (p = tu ping en ms, para compensar). */
   | { t: 'mi'; k: MgKey; p?: number }
   | { t: 're'; e: number }
+  /** Evento Ruleta: tu apuesta. */
+  | { t: 'rb'; c: string; a: number }
   | { t: 'ping'; c: number }
   | { t: 'leave' };
 

@@ -135,13 +135,15 @@ export class MinigameHubScene extends Phaser.Scene {
     this.pr = new Paron(
       this.players.map((p) => ({ id: p.id, name: p.name, team: p.team, bot: p.bot })),
       Math.random,
-      { solo: true, forced: id, extra: this.extra, skipBreak: true },
+      { solo: true, queue: [id], extra: this.extra },
     );
     const host: MgHost = {
       myId: 0,
       net: () => (this.pr ? this.pr.net() : null),
       t: () => (this.pr ? this.pr.game.t : 0),
       input: (k) => this.pr?.input(0, k, 0),
+      bet: () => undefined,
+      balance: () => account.lonchas,
       react: (e) => this.reactions.push({ id: 0, e }),
       reactions: () => {
         const r = this.reactions;

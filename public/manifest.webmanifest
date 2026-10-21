@@ -1,0 +1,16 @@
+{
+  "name": "JAMONGUS",
+  "short_name": "JAMONGUS",
+  "description": "Pilla-pilla a jamonazos en pixel art: 4 modos, minijuegos y online con hasta 20 amigos.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#0d0b14",
+  "theme_color": "#1a1428",
+  "lang": "es",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

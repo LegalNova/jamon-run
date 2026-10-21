@@ -1,4 +1,4 @@
-import { AIParams, BALANCE, CITY, Difficulty, HYPE, PARON, PHRASES, TILE } from '../balance';
+import { AIParams, BALANCE, CITY, Difficulty, HYPE, MODES, PARON, ParonLevel, PHRASES, TILE } from '../balance';
 import { resolveCircle } from '../collision';
 import { DistField, Grid, SHOT_BLOCKERS, Terrain } from '../grid';
 import { MapId } from '../maps';
@@ -43,7 +43,7 @@ export interface SimOptions {
   /** Semilla de los objetos del mapa (Escondite). */
   seed?: number;
   /** Parón Dopamina (minijuego a mitad de partida). */
-  paron?: boolean;
+  paron?: ParonLevel | boolean;
 }
 
 /** Hint sonoro reciente (la IA de los buscadores lo usa). */
@@ -57,6 +57,53 @@ export interface HintMark {
  * La partida completa, sin gráficos: reglas, personajes, IA, objetos y proyectiles.
  * La ejecutan el navegador (modo offline) y el servidor (modo online).
  */
+export interface ParonSlot {
+  at: number;
+  kind: 'mini' | 'ruleta' | 'carrera';
+  /** Parón Doble: dos minijuegos seguidos. */
+  double: boolean;
+}
+
+/**
+ * Calendario de la partida: 2-3 Parones de minijuegos (según duración y lo que elija el anfitrión)
+ * y, como mucho una vez cada uno, el Evento Ruleta y el Evento Carrera.
+ */
+export function buildSchedule(mode: ModeId, duration: number, level: ParonLevel, rng: () => number): ParonSlot[] {
+  let n: number = PARON.levels[level];
+  if (n === 0) return [];
+  const bomba = mode === 'bomba';
+  if (!bomba && duration >= PARON.longFrom) n++;
+  // Huecos posibles, separados al menos minGap segundos.
+  let slots: number;
+  let first: number;
+  let span: number;
+  if (bomba) {
+    first = PARON.bombaEvery;
+    slots = n + 2;
+    span = PARON.bombaEvery * (slots - 1);
+  } else {
+    // En el Escondite, nunca durante la fase de esconderse.
+    first = mode === 'escondite' ? MODES.escondite.hideSeconds + 10 : PARON.firstAt;
+    span = Math.max(0, duration - PARON.endMargin - first);
+    slots = Math.max(1, Math.floor(span / PARON.minGap) + 1);
+  }
+  const minis = Math.min(n, slots);
+  const kinds: ParonSlot['kind'][] = Array(minis).fill('mini');
+  if (kinds.length < slots && rng() < PARON.eventChance.ruleta) kinds.push('ruleta');
+  if (kinds.length < slots && rng() < PARON.eventChance.carrera) kinds.push('carrera');
+  // Orden al azar (pero el primero, mejor un minijuego).
+  for (let i = kinds.length - 1; i > 1; i--) {
+    const j = 1 + Math.floor(rng() * i);
+    [kinds[i], kinds[j]] = [kinds[j], kinds[i]];
+  }
+  const k = kinds.length;
+  return kinds.map((kind, i) => {
+    const base = k === 1 ? first + span * (0.3 + rng() * 0.4) : first + (span * i) / (bomba ? slots - 1 : k - 1 || 1);
+    const at = bomba ? first + i * PARON.bombaEvery + rng() * 10 : Math.min(duration - PARON.endMargin, base + (rng() - 0.5) * 6);
+    return { at: Math.round(at * 10) / 10, kind, double: kind === 'mini' && rng() < PARON.doubleChance };
+  });
+}
+
 export class Sim implements SimCtx, BotWorld {
   readonly grid: Grid;
   readonly mapId: MapId;
@@ -73,8 +120,10 @@ export class Sim implements SimCtx, BotWorld {
   hints: HintMark[] = [];
   /** Congelada por el Parón: nadie se mueve, nadie recibe golpes, el reloj no avanza. */
   frozen = false;
-  readonly paronAt: number;
-  private paronDone: boolean;
+  /** Calendario de Parones y eventos de esta partida. */
+  schedule: ParonSlot[];
+  /** El Parón/evento que está en marcha. */
+  current: ParonSlot | null = null;
   readonly scale: MapScale;
   readonly ai: AIParams;
   readonly duration: number;
@@ -120,9 +169,8 @@ export class Sim implements SimCtx, BotWorld {
     this.timeLeft = this.duration;
     this.props = this.mode === 'escondite' ? buildProps(this.grid, this.seed) : [];
     this.modeImpl = createMode(this.mode);
-    this.paronDone = o.paron === false;
-    const [a, b] = this.mode === 'bomba' ? PARON.bombaAt : [PARON.at[0] * this.duration, PARON.at[1] * this.duration];
-    this.paronAt = a + Math.random() * (b - a);
+    const level: ParonLevel = o.paron === false ? 'no' : o.paron === true || o.paron === undefined ? 'normal' : o.paron;
+    this.schedule = buildSchedule(this.mode, this.duration, level, Math.random);
     this.spawn(o.roster);
     this.modeImpl.setup(this);
     this.hype = new Hype(this);
@@ -448,14 +496,15 @@ export class Sim implements SimCtx, BotWorld {
     }
 
     // ¡PARÓN! Una vez por partida, entre el 30% y el 70% del tiempo.
-    if (this.state === 'play' && !this.paronDone && this.matchTime >= this.paronAt && this.chars.some((c) => c.human)) {
-      this.paronDone = true;
+    if (this.state === 'play' && this.schedule.length && this.matchTime >= this.schedule[0].at && this.chars.some((c) => c.human)) {
+      const ev = this.schedule.shift()!;
+      this.current = ev;
       this.frozen = true;
       for (const c of this.chars) {
         c.vx = c.vy = c.kbx = c.kby = 0;
         c.dashTime = 0;
       }
-      this.events.push({ t: 'paron' });
+      this.events.push({ t: 'paron', k: ev.kind, d: ev.double });
       return;
     }
 

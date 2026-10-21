@@ -10,7 +10,7 @@ import { cutGrade, knifeAt } from '../../shared/minigames/corta';
 import { slabAt } from '../../shared/minigames/torre';
 import { pullAt } from '../../shared/minigames/tira';
 import { slotsAt } from '../../shared/minigames/trilero';
-import { BET_NAMES, BETS, pocketColor, WHEEL } from '../../shared/minigames/ruleta';
+import { Color, payout, pocketColor, WHEEL } from '../../shared/minigames/ruleta';
 import type { Look } from '../../shared/look';
 import type { Team } from '../../shared/sim/types';
 import { audio } from '../core/audio';
@@ -32,6 +32,11 @@ export interface ViewHost {
   info(id: number): MgPlayerInfo | undefined;
   /** Tiempo del minijuego (suave). */
   t(): number;
+  /** Evento Ruleta: apostar y saldo de lonchas. */
+  bet(c: string, a: number): void;
+  balance(): number;
+  /** Enviar teclas (para los toques en pantalla). */
+  send(keys: MgKey[]): void;
 }
 
 type St = Record<string, unknown>;
@@ -65,35 +70,57 @@ export abstract class MgView {
   abstract update(st: St, dt: number): void;
   /** Respuesta inmediata a tu tecla (antes de que conteste el servidor). */
   onKey(_k: MgKey, _st: St): void {}
+  /** Toque en pantalla (coordenadas locales): qué teclas manda. Por defecto, ESPACIO. */
+  onPointer(_x: number, _y: number, _st: St): MgKey[] {
+    return ['a'];
+  }
+  /** Teclas numéricas (la ruleta usa 1-3). */
+  onDigit(_n: number): boolean {
+    return false;
+  }
   destroy(): void {
     this.c.destroy();
   }
 }
 
-// =================================================================== RULETA
+// =================================================================== EVENTO RULETA
 
+const COLOR_INFO: { c: Color; name: string; pay: string; fill: number; key: string }[] = [
+  { c: 'rojo', name: 'ROJO', pay: 'PAGA 1 A 1', fill: 0xc8283a, key: '1' },
+  { c: 'negro', name: 'NEGRO', pay: 'PAGA 1 A 1', fill: 0x2a2433, key: '2' },
+  { c: 'verde', name: 'VERDE 0/00', pay: 'PAGA 17 A 1', fill: 0x2f9e5a, key: '3' },
+];
+
+/** Evento Ruleta: tres botones enormes, una cantidad y listo. */
 class RuletaView extends MgView {
   private wheel: Phaser.GameObjects.Container;
   private ball: Phaser.GameObjects.Arc;
-  private boxes: { g: Phaser.GameObjects.Graphics; chips: Phaser.GameObjects.BitmapText; x: number; y: number; w: number; hgt: number }[] = [];
-  private chipsText: Phaser.GameObjects.BitmapText;
   private bubble: Phaser.GameObjects.BitmapText;
-  private hist: Phaser.GameObjects.Graphics;
-  private histT: Phaser.GameObjects.BitmapText[] = [];
+  private bubbleBg: Phaser.GameObjects.Graphics;
+  private btns: { g: Phaser.GameObjects.Graphics; zone: Phaser.GameObjects.Zone; x: number; y: number; w: number; h: number; c: Color }[] = [];
+  private amountText: Phaser.GameObjects.BitmapText;
+  private winText: Phaser.GameObjects.BitmapText;
+  private balText: Phaser.GameObjects.BitmapText;
+  private bar: Phaser.GameObjects.Graphics;
   private result: Phaser.GameObjects.BitmapText;
-  private board_: Phaser.GameObjects.BitmapText[] = [];
-  private spinStart = -1;
+  private others: Phaser.GameObjects.BitmapText[] = [];
+  private hist: Phaser.GameObjects.Graphics;
+  private amt: Phaser.GameObjects.Container;
+  private coin: Phaser.GameObjects.Image;
+  private color: Color | null = null;
+  private amount = 50;
   private r0 = 0;
   private target = 0;
-  private lastBounce = 0;
+  private started = false;
   private shown = false;
-  private R = 58;
+  private lastBounce = 0;
+  private R = 48;
 
   constructor(h: ViewHost) {
     super(h);
     const R = this.R;
-    const cx = -118;
-    const cy = 6;
+    const cx = -150;
+    const cy = -6;
     const g0 = this.add(this.s.add.graphics());
     g0.fillStyle(0x3b2414, 1).fillCircle(cx, cy, R + 8);
     g0.fillStyle(0x7a4a24, 1).fillCircle(cx, cy, R + 5);
@@ -107,92 +134,146 @@ class RuletaView extends MgView {
     });
     g.lineStyle(1, 0xc79a1c, 0.8).strokeCircle(0, 0, R);
     g.fillStyle(0x5a3418, 1).fillCircle(0, 0, R * 0.6);
-    g.fillStyle(0xc79a1c, 1).fillCircle(0, 0, 6);
-    g.lineStyle(1, 0xffd23f, 1);
-    for (let k = 0; k < 4; k++) {
-      const a = (k * Math.PI) / 2;
-      g.lineBetween(0, 0, Math.cos(a) * R * 0.5, Math.sin(a) * R * 0.5);
-    }
+    g.fillStyle(0xc79a1c, 1).fillCircle(0, 0, 5);
     this.wheel.add(g);
     WHEEL.forEach((p, i) => {
       const a = -Math.PI / 2 + (i + 0.5) * seg;
-      const t = this.s.add.bitmapText(Math.cos(a) * R * 0.8, Math.sin(a) * R * 0.8, FONT, p).setOrigin(0.5).setScale(0.5).setRotation(a + Math.PI / 2);
-      this.wheel.add(t);
+      this.wheel.add(this.s.add.bitmapText(Math.cos(a) * R * 0.8, Math.sin(a) * R * 0.8, FONT, p).setOrigin(0.5).setScale(0.5).setRotation(a + Math.PI / 2));
     });
     const ptr = this.add(this.s.add.graphics());
     ptr.fillStyle(0xffd23f, 1).fillTriangle(cx - 4, cy - R - 10, cx + 4, cy - R - 10, cx, cy - R - 2);
     this.ball = this.add(this.s.add.circle(cx, cy - R - 3, 2.5, 0xffffff));
-    // croupier
     const ck = ensureCharTexture(this.s, null, { name: '', color: 9, skin: 2, hair: 3, hairColor: 0, hat: 0, glasses: 0, extra: 2 });
-    this.add(this.s.add.sprite(cx - 70, cy - 66, ck, 'down_idle0').setScale(2).play(`${ck}_down_idle`));
-    this.bubble = this.add(this.s.add.bitmapText(cx - 50, cy - 82, FONT_PLAIN, '').setOrigin(0, 0.5).setTint(0x1a1424));
-    const bb = this.s.add.graphics();
-    this.c.addAt(bb, this.c.getIndex(this.bubble));
-    this.bubble.setData('bg', bb);
-    // tapete
-    const tp = this.add(this.s.add.graphics());
-    panel(tp, -8, -86, 222, 158, 0x1f6b3a, 0xc79a1c);
-    this.txt(103, -78, 'TAPETE · ← → ELIGE · ESPACIO APUESTA', 0xfee761);
-    BETS.forEach((b, i) => {
-      const x = 2 + (i % 2) * 105;
-      const y = -66 + Math.floor(i / 2) * 30;
-      const bg = this.add(this.s.add.graphics());
-      this.boxes.push({ g: bg, chips: this.txt(x + 96, y + 19, '', 0xffd23f, 1, [1, 0.5]), x, y, w: 100, hgt: 26 });
-      void b;
-    });
-    this.chipsText = this.txt(103, 64, '', 0xffd23f, 2);
+    this.add(this.s.add.sprite(cx - 44, cy - 74, ck, 'down_idle0').setScale(2).play(`${ck}_down_idle`));
+    this.bubbleBg = this.add(this.s.add.graphics());
+    this.bubble = this.add(this.s.add.bitmapText(cx - 26, cy - 88, FONT_PLAIN, '').setOrigin(0, 0.5).setTint(0x1a1424));
     this.hist = this.add(this.s.add.graphics());
-    this.result = this.txt(-118, 84, '', 0xffffff, 2);
+    // tres botones enormes
+    COLOR_INFO.forEach((ci, i) => {
+      const x = -60 + i * 92;
+      const y = -78;
+      const w = 86;
+      const hgt = 60;
+      const bg = this.add(this.s.add.graphics());
+      this.txt(x + w / 2, y + 20, ci.name, 0xffffff, ci.c === 'verde' ? 1 : 2);
+      this.txt(x + w / 2, y + 40, ci.pay, 0xfee761);
+      this.txt(x + 8, y + 8, ci.key, 0xc2c3c7);
+      const zone = this.add(this.s.add.zone(x + w / 2, y + hgt / 2, w, hgt).setInteractive({ useHandCursor: true }));
+      zone.on('pointerdown', () => this.pick(ci.c));
+      this.btns.push({ g: bg, zone, x, y, w, h: hgt, c: ci.c });
+    });
+    // cantidad
+    this.amt = this.add(this.s.add.container(0, 0));
+    this.coin = this.add(this.s.add.image(-46, 6, 'icon_loncha_big'));
+    this.amountText = this.txt(28, 6, '50', 0xffd23f, 3);
+    this.balText = this.txt(110, 6, '', UI.muted, 1, [0, 0.5]);
+    const amounts: [string, () => void][] = [
+      ['-', () => this.setAmount(this.amount - MG.ruleta.step)],
+      ...MG.ruleta.amounts.map((a) => [String(a), () => this.setAmount(a)] as [string, () => void]),
+      ['TODO', () => this.setAmount(Number.MAX_SAFE_INTEGER)],
+      ['+', () => this.setAmount(this.amount + MG.ruleta.step)],
+    ];
+    amounts.forEach(([label, fn], i) => {
+      const w = label === 'TODO' ? 44 : 34;
+      const x = -60 + i * 46 + (label === '+' ? 10 : 0);
+      const y = 34;
+      const bg = this.s.add.graphics();
+      panel(bg, x, y, w, 24, UI.panelLight);
+      this.amt.add(bg);
+      this.amt.add(this.s.add.bitmapText(x + w / 2, y + 12, FONT, fontText(label)).setOrigin(0.5).setScale(label.length === 1 ? 2 : 1));
+      const z = this.s.add.zone(x + w / 2, y + 12, w, 28).setInteractive({ useHandCursor: true });
+      z.on('pointerdown', () => {
+        fn();
+        audio.play('click');
+      });
+      this.amt.add(z);
+    });
+    this.winText = this.txt(80, 74, '', 0x63c74d, 1);
+    this.bar = this.add(this.s.add.graphics());
+    this.result = this.txt(60, 0, '', 0xffffff, 2);
+    this.setAmount(50);
+  }
+
+  private balance(): number {
+    return Math.max(0, Math.min(MG.ruleta.maxBet, this.h.balance()));
+  }
+
+  private setAmount(a: number): void {
+    const max = this.balance();
+    this.amount = Math.max(Math.min(MG.ruleta.step, max), Math.min(max, Math.round(a)));
+    this.amountText.setText(String(this.amount));
+    pop(this.s, this.amountText, 1.2, 120);
+    if (this.color) this.h.bet(this.color, this.amount);
+  }
+
+  private pick(c: Color): void {
+    if (this.h.t() >= MG.ruleta.bet) return;
+    if (this.balance() <= 0) {
+      audio.play('denied');
+      this.result.setText(fontText('NO TIENES LONCHAS')).setTint(0xff5a5a);
+      return;
+    }
+    this.color = c;
+    this.h.bet(c, this.amount);
+    audio.play('thump');
+    shake(this.s, 0.003, 60);
   }
 
   private say(s: string): void {
     this.bubble.setText(fontText(s));
-    const bg = this.bubble.getData('bg') as Phaser.GameObjects.Graphics;
-    bg.clear();
+    this.bubbleBg.clear();
     if (!s) return;
     const w = this.bubble.width + 6;
-    bg.fillStyle(0xffffff, 1).fillRect(this.bubble.x - 3, this.bubble.y - 6, w, 12);
-    bg.fillTriangle(this.bubble.x - 3, this.bubble.y + 2, this.bubble.x - 8, this.bubble.y + 5, this.bubble.x + 2, this.bubble.y + 6);
+    this.bubbleBg.fillStyle(0xffffff, 1).fillRect(this.bubble.x - 3, this.bubble.y - 6, w, 12);
+    this.bubbleBg.fillTriangle(this.bubble.x - 3, this.bubble.y + 2, this.bubble.x - 8, this.bubble.y + 5, this.bubble.x + 2, this.bubble.y + 6);
   }
 
   update(st: St, dt: number): void {
     const R = MG.ruleta;
     const t = this.h.t();
-    const me = this.me<{ c: number; b: Record<string, number>; s: number; n: number; w: number }>(st);
-    const seg = (Math.PI * 2) / WHEEL.length;
+    const betting = t < R.bet;
+    const mine = this.me<{ c: Color; a: number }>(st);
+    // botones
+    for (const b of this.btns) {
+      const sel = (mine?.c ?? this.color) === b.c;
+      const fill = COLOR_INFO.find((c) => c.c === b.c)!.fill;
+      b.g.clear();
+      b.g.fillStyle(0x000000, 0.4).fillRect(b.x + 3, b.y + 4, b.w, b.h);
+      b.g.fillStyle(sel ? 0xfee761 : 0x0d0b14, 1).fillRect(b.x - 2, b.y - 2, b.w + 4, b.h + 4);
+      b.g.fillStyle(fill, betting || sel ? 1 : 0.4).fillRect(b.x, b.y, b.w, b.h);
+      b.g.fillStyle(0xffffff, 0.15).fillRect(b.x, b.y, b.w, 3);
+      b.zone.input!.enabled = betting;
+    }
+    this.amt.setAlpha(betting ? 1 : 0.3);
+    // Al cerrarse las apuestas, el sitio de la cantidad es para el resultado.
+    this.amountText.setVisible(betting);
+    this.coin.setVisible(betting);
+    this.balText.setVisible(betting);
+    this.balText.setText(fontText(`TIENES ${this.h.balance()}`));
+    const c = mine?.c ?? this.color;
+    const a = mine?.a ?? this.amount;
+    if (betting) this.winText.setText(fontText(c ? `AL ${c.toUpperCase()}: SI SALE, GANAS +${a * R.pay[c]}` : 'ELIGE UN COLOR (1 2 3)')).setTint(c ? 0x63c74d : 0xfee761);
+    else if (!mine) this.winText.setText(fontText('SIN APUESTA ESTA VEZ')).setTint(UI.muted);
+    else this.winText.setText(fontText(`APUESTA: ${mine.a} AL ${mine.c.toUpperCase()}`)).setTint(0xfee761);
+    // barra de tiempo (10 s)
+    this.bar.clear();
+    if (betting) {
+      const k = 1 - t / R.bet;
+      this.bar.fillStyle(0x0d0b14, 1).fillRect(-60, -94, 270, 6);
+      this.bar.fillStyle(k < 0.3 ? 0xe43b44 : 0x63c74d, 1).fillRect(-59, -93, Math.round(268 * k), 4);
+    }
+    // rueda y bola
     const pk = st.pk as string;
-    // apuestas
-    BETS.forEach((b, i) => {
-      const box = this.boxes[i];
-      const sel = me?.s === i && t < R.bet;
-      const fill = b === 'rojo' ? 0xc8283a : b === 'negro' ? 0x1d1a24 : b === 'verde' ? 0x2f9e5a : b === 'numero' ? 0x7a5a14 : 0x2a7a48;
-      const win = st.res && pk && this.wins(b, pk, me?.n ?? 0);
-      box.g.clear();
-      box.g.fillStyle(sel ? (Math.floor(t * 6) % 2 ? 0xffffff : 0xfee761) : win ? 0xfee761 : 0x0d0b14, 1).fillRect(box.x - 1, box.y - 1, box.w + 2, box.hgt + 2);
-      box.g.fillStyle(fill, 1).fillRect(box.x, box.y, box.w, box.hgt);
-      const amount = me?.b[b] ?? 0;
-      // fichas apiladas
-      for (let k = 0; k < Math.min(6, amount / R.chip); k++) {
-        box.g.fillStyle(0x0d0b14, 1).fillCircle(box.x + 10 + k * 3, box.y + 17 - k * 2, 5);
-        box.g.fillStyle(k % 2 ? 0xe43b44 : 0x2f88e8, 1).fillCircle(box.x + 10 + k * 3, box.y + 16 - k * 2, 4);
-        box.g.fillStyle(0xffffff, 1).fillRect(box.x + 9 + k * 3, box.y + 15 - k * 2, 2, 1);
-      }
-      box.chips.setText(amount ? String(amount) : '');
-      if (!box.g.getData('label')) {
-        const label = b === 'numero' ? `TU NÚMERO ${me?.n ?? '?'}` : BET_NAMES[b];
-        box.g.setData('label', this.txt(box.x + 4, box.y + 6, `${label} · ${R.pay[b]}:1`, 0xffffff, 1, [0, 0.5]));
-      }
-    });
-    this.chipsText.setText(fontText(`FICHAS: ${me?.c ?? 0}`));
-    // rueda
-    if (t < R.bet) {
+    const ss = st.ss as number;
+    const seg = (Math.PI * 2) / WHEEL.length;
+    if (!pk || ss < 0) {
       this.wheel.rotation = t * 0.5;
       this.ball.setPosition(this.wheel.x + Math.cos(-t * 2) * (this.R + 3), this.wheel.y + Math.sin(-t * 2) * (this.R + 3));
-      this.say(t < R.bet - 3 ? '¡HAGAN JUEGO!' : '¡ÚLTIMAS APUESTAS!');
-    } else if (pk) {
-      if (this.spinStart < 0) {
-        this.spinStart = R.bet;
-        this.r0 = R.bet * 0.5;
+      this.say(betting ? (t < R.bet - 3 ? '¡HAGAN JUEGO!' : '¡ÚLTIMAS APUESTAS!') : 'NO VA MÁS');
+    } else {
+      if (!this.started) {
+        this.started = true;
+        this.r0 = this.wheel.rotation;
         const i = WHEEL.indexOf(pk);
         // La rueda para justo en el número que ha salido (sin trucos de "casi").
         let target = -(i + 0.5) * seg;
@@ -200,63 +281,69 @@ class RuletaView extends MgView {
         this.target = target;
         audio.play('whoosh');
       }
-      const u = Math.min(1, (t - R.bet) / R.spin);
+      const u = Math.min(1, Math.max(0, (t - ss) / R.spin));
       const e = 1 - Math.pow(1 - u, 3);
       this.wheel.rotation = this.r0 + (this.target - this.r0) * e;
-      // la bola gira al revés, baja y rebota hasta caer en su casilla
       const ballA = -Math.PI / 2 - (1 - e) * Math.PI * 12;
-      const drop = u < 0.65 ? this.R + 3 : this.R * 0.8 + Math.abs(Math.sin(u * 40)) * (1 - u) * 12;
+      const drop = u < 0.65 ? this.R + 3 : this.R * 0.8 + Math.abs(Math.sin(u * 40)) * (1 - u) * 10;
       this.ball.setPosition(this.wheel.x + Math.cos(ballA) * drop, this.wheel.y + Math.sin(ballA) * drop);
       if (u > 0.65 && u < 1 && t - this.lastBounce > 0.08 + u * 0.15) {
         this.lastBounce = t;
         audio.play('ball');
       }
       this.say(u < 1 ? 'NO VA MÁS' : `¡EL ${pk} ${pocketColor(pk).toUpperCase()}!`);
-      if (st.res && !this.shown) {
+      if (u >= 1 && !this.shown) {
         this.shown = true;
-        const w = me?.w ?? 0;
-        if (w > 0) {
-          this.result.setText(fontText(`¡GANAS +${w} FICHAS!`)).setTint(0xfee761);
+        const d = mine ? payout(mine.c, mine.a, pk) : 0;
+        this.btns.forEach((b) => b.g.setAlpha(b.c === pocketColor(pk) ? 1 : 0.25));
+        if (d > 0) {
+          this.result.setText(fontText(`¡GANAS +${d}!`)).setTint(0xfee761);
           audio.play('jackpot');
-          shake(this.s, 0.006, 200);
-          this.s.game.events.emit('mgConfetti', 60);
-        } else {
-          this.result.setText(fontText('ESTA VEZ NO...')).setTint(UI.muted);
+          shake(this.s, 0.008, 220);
+          this.s.game.events.emit('mgConfetti', 70);
+        } else if (d < 0) {
+          this.result.setText(fontText(`PIERDES ${-d}`)).setTint(0xff5a5a);
           audio.play('lose');
-        }
-        pop(this.s, this.result, 1.4);
+        } else this.result.setText(fontText(`SALE ${pocketColor(pk).toUpperCase()}`)).setTint(0xffffff);
+        pop(this.s, this.result, 1.5, 220);
       }
     }
-    // historial de los últimos 10
-    const hist = (st.h as string[]) ?? [];
+    // últimos números
     this.hist.clear();
-    hist.slice(0, 10).forEach((p, i) => {
-      const x = -176 + i * 12;
+    ((st.h as string[]) ?? []).slice(0, 10).forEach((p, i) => {
+      const x = -196 + i * 10;
       const col = pocketColor(p) === 'verde' ? 0x2f9e5a : pocketColor(p) === 'rojo' ? 0xc8283a : 0x1d1a24;
-      this.hist.fillStyle(0x0d0b14, 1).fillRect(x - 1, 95, 12, 10);
-      this.hist.fillStyle(col, 1).fillRect(x, 96, 10, 8);
-      if (!this.histT[i]) this.histT[i] = this.txt(x + 5, 100, '', 0xffffff, 0.5);
-      this.histT[i].setText(p);
+      this.hist.fillStyle(0x0d0b14, 1).fillRect(x - 1, 63, 10, 8);
+      this.hist.fillStyle(col, 1).fillRect(x, 64, 8, 6);
     });
-    // los que más fichas llevan
-    const ps = st.ps as Ps<{ c: number }>;
-    const rows = Object.entries(ps)
-      .sort((a, b) => b[1].c - a[1].c)
-      .map(([id, p]) => [this.h.info(Number(id))?.name ?? '?', String(p.c)] as [string, string]);
-    this.board(214, 80, rows.slice(0, 3), this.board_);
+    // lo que apuestan los demás
+    const ps = Object.entries((st.ps as Ps<{ c: Color; a: number }>) ?? {}).filter(([id]) => Number(id) !== this.h.myId).slice(0, 4);
+    ps.forEach(([id, b], i) => {
+      if (!this.others[i]) this.others[i] = this.txt(-212, 78 + i * 9, '', UI.muted, 1, [0, 0.5]);
+      this.others[i].setText(fontText(`${this.h.info(Number(id))?.name ?? '?'} ${b.a} ${b.c.toUpperCase()}`));
+    });
     void dt;
-  }
-
-  private wins(b: string, pk: string, lucky: number): boolean {
-    const green = pk === '0' || pk === '00';
-    const n = Number(pk);
-    const red = pocketColor(pk) === 'rojo';
-    return b === 'rojo' ? red : b === 'negro' ? !green && !red : b === 'verde' ? green : green ? false : b === 'par' ? n % 2 === 0 : b === 'impar' ? n % 2 === 1 : b === 'bajo' ? n <= 18 : b === 'alto' ? n >= 19 : n === lucky;
   }
 
   onKey(k: MgKey): void {
     if (this.h.t() >= MG.ruleta.bet) return;
-    audio.play(k === 'a' ? 'thump' : k === 'b' ? 'back' : 'hover');
+    // ESPACIO cambia de color; ← → la cantidad.
+    if (k === 'a' || k === 'b') {
+      const order: Color[] = ['rojo', 'negro', 'verde'];
+      this.pick(order[(order.indexOf(this.color ?? 'verde') + 1) % 3]);
+    } else this.setAmount(this.amount + (k === 'l' ? -MG.ruleta.step : MG.ruleta.step));
+  }
+
+  /** En la ruleta se toca en los botones (no en cualquier sitio). */
+  onPointer(): MgKey[] {
+    return [];
+  }
+
+  /** Teclas 1, 2, 3: rojo, negro, verde. */
+  onDigit(n: number): boolean {
+    if (n < 1 || n > 3) return false;
+    this.pick(COLOR_INFO[n - 1].c);
+    return true;
   }
 }
 
@@ -265,6 +352,18 @@ class RuletaView extends MgView {
 const COMMENTS = ['¡SALEN!', '¡VA EN CABEZA {H}!', '¡ADELANTA {H}!', '¡QUÉ IGUALADO!', '¡RECTA FINAL!'];
 
 class CaballosView extends MgView {
+  onPointer(_x: number, y: number, st: St): MgKey[] {
+    if (this.h.t() >= MG.caballos.pick) return ['a'];
+    const me = this.me<{ s: number; l: boolean }>(st);
+    if (!me || me.l) return [];
+    const lane = Math.max(0, Math.min(MG.caballos.horses.length - 1, Math.round((y + 66) / 24)));
+    const n = MG.caballos.horses.length;
+    const keys: MgKey[] = [];
+    for (let k = 0; k < (lane - me.s + n) % n; k++) keys.push('r');
+    keys.push('a');
+    return keys;
+  }
+
   private horses: Phaser.GameObjects.Sprite[] = [];
   private labels: Phaser.GameObjects.BitmapText[] = [];
   private sel: Phaser.GameObjects.Graphics;
@@ -615,6 +714,17 @@ class TiraView extends MgView {
 // =================================================================== TRILERO
 
 class TrileroView extends MgView {
+  onPointer(x: number, _y: number, st: St): MgKey[] {
+    const me = this.me<{ s: number }>(st);
+    const n = st.n as number;
+    if (!me) return [];
+    const slot = Math.max(0, Math.min(n - 1, Math.round(x / (300 / Math.max(3, n)) + (n - 1) / 2)));
+    const keys: MgKey[] = [];
+    for (let k = 0; k < (slot - me.s + n) % n; k++) keys.push('r');
+    keys.push('a');
+    return keys;
+  }
+
   private cups: Phaser.GameObjects.Image[] = [];
   private gold: Phaser.GameObjects.Image;
   private cursor: Phaser.GameObjects.Graphics;
@@ -837,10 +947,179 @@ class RitmoView extends MgView {
     this.board(214, -84, rows, this.board_);
   }
 
+  onPointer(x: number): MgKey[] {
+    return [x < 0 ? 'l' : 'r'];
+  }
+
   onKey(k: MgKey): void {
     const lane = k === 'l' || k === 'a' ? -26 : 26;
     const fl = this.add(this.s.add.rectangle(lane, 70, 36, 6, 0xffffff, 0.7));
     this.s.tweens.add({ targets: fl, alpha: 0, scaleY: 3, duration: 150, onComplete: () => fl.destroy() });
+  }
+}
+
+// =================================================================== ATRAPA LONCHAS
+
+class AtrapaView extends MgView {
+  private g: Phaser.GameObjects.Graphics;
+  private basket: Phaser.GameObjects.Container;
+  private items = new Map<number, Phaser.GameObjects.Image>();
+  private score: Phaser.GameObjects.BitmapText;
+  private lane = 2;
+  private localAt = -9;
+  private got = new Set<number>();
+  private board_: Phaser.GameObjects.BitmapText[] = [];
+
+  constructor(h: ViewHost) {
+    super(h);
+    this.g = this.add(this.s.add.graphics());
+    const N = MG.atrapa.lanes;
+    for (let i = 0; i < N; i++) {
+      this.g.fillStyle(i % 2 ? 0x1a1428 : 0x211a33, 1).fillRect(this.laneX(i) - 26, -100, 52, 200);
+    }
+    const b = this.s.add.graphics();
+    b.fillStyle(0x0d0b14, 1).fillRect(-21, -9, 42, 16);
+    b.fillStyle(0xb8763e, 1).fillRect(-20, -8, 40, 14);
+    b.fillStyle(0x7a4a24, 1).fillRect(-20, -2, 40, 2).fillRect(-20, 3, 40, 2);
+    this.basket = this.add(this.s.add.container(this.laneX(2), 82, [b]));
+    this.score = this.txt(-200, -86, '0', 0xfee761, 3, [0, 0.5]);
+    this.txt(0, 96, '← → MUEVE LA CESTA · TOCA A LOS LADOS', UI.muted);
+  }
+
+  private laneX(i: number): number {
+    return (i - (MG.atrapa.lanes - 1) / 2) * 54;
+  }
+
+  update(st: St, dt: number): void {
+    const t = this.h.t();
+    const me = this.me<{ l: number; s: number; g: number[] }>(st);
+    // la cesta responde al instante; el servidor manda cuando no estás pulsando
+    if (me && t - this.localAt > 0.4) this.lane = me.l;
+    this.basket.x += (this.laneX(this.lane) - this.basket.x) * Math.min(1, dt * 20);
+    if (me) {
+      this.score.setText(String(me.s));
+      for (const i of me.g) {
+        if (this.got.has(i)) continue;
+        this.got.add(i);
+        const it = (st.d as number[][])[i];
+        audio.play(it[2] === 2 ? 'boom' : it[2] === 1 ? 'jackpot' : 'coin');
+        if (it[2] === 2) shake(this.s, 0.01, 200);
+        pop(this.s, this.score, 1.4);
+        this.items.get(i)?.destroy();
+        this.items.delete(i);
+      }
+    }
+    const drops = st.d as number[][];
+    drops.forEach(([tl, lane, type], i) => {
+      const y = 82 - (tl - t) * 120;
+      let img = this.items.get(i);
+      if (y < -110 || y > 100 || this.got.has(i)) {
+        if (img && y > 100) {
+          img.destroy();
+          this.items.delete(i);
+        }
+        return;
+      }
+      if (!img) {
+        img = this.add(this.s.add.image(this.laneX(lane), y, type === 2 ? 'bomb_ham' : type === 1 ? 'icon_loncha_big' : 'p_slice'));
+        if (type === 0) img.setScale(3);
+        if (type === 1) img.setTint(0xffd23f);
+        this.items.set(i, img);
+      }
+      img.setY(y).setAngle(type === 0 ? t * 120 : 0);
+    });
+    const ps = st.ps as Ps<{ s: number }>;
+    const rows = Object.entries(ps)
+      .sort((a, b) => b[1].s - a[1].s)
+      .map(([id, p]) => [this.h.info(Number(id))?.name ?? '?', String(p.s)] as [string, string]);
+    this.board(214, -84, rows, this.board_);
+  }
+
+  onKey(k: MgKey): void {
+    this.localAt = this.h.t();
+    this.lane = Math.max(0, Math.min(MG.atrapa.lanes - 1, this.lane + (k === 'l' || k === 'a' ? -1 : 1)));
+    audio.play('hover');
+  }
+
+  onPointer(x: number): MgKey[] {
+    return [x < this.basket.x ? 'l' : 'r'];
+  }
+}
+
+// =================================================================== CUENTA JAMONES
+
+class CuentaView extends MgView {
+  private flying = new Map<string, Phaser.GameObjects.Image>();
+  private opts: { g: Phaser.GameObjects.Graphics; t: Phaser.GameObjects.BitmapText }[] = [];
+  private info: Phaser.GameObjects.BitmapText;
+  private lastRound = -1;
+  private board_: Phaser.GameObjects.BitmapText[] = [];
+
+  constructor(h: ViewHost) {
+    super(h);
+    this.info = this.txt(0, -88, '', 0xfee761);
+    for (let i = 0; i < 3; i++) {
+      const g = this.add(this.s.add.graphics());
+      this.opts.push({ g, t: this.txt((i - 1) * 90, 50, '', 0xffffff, 3) });
+    }
+  }
+
+  update(st: St): void {
+    const C = MG.cuenta;
+    const t = this.h.t();
+    const r = st.r as number;
+    if (r !== this.lastRound) {
+      this.lastRound = r;
+      for (const im of this.flying.values()) im.destroy();
+      this.flying.clear();
+    }
+    const start = st.st as number;
+    const pickAt = start + C.show;
+    const items = st.it as number[][];
+    for (const [it0, hgt, type] of items) {
+      const key = `${r}:${it0}:${hgt}`;
+      const x = -230 + (t - it0) * 240;
+      let im = this.flying.get(key);
+      if (!im) {
+        im = this.add(this.s.add.image(x, -60 + hgt * 90, type === 0 ? 'ham' : 'p_slice').setScale(type === 0 ? 2 : 3));
+        this.flying.set(key, im);
+        audio.play('whoosh');
+      }
+      im.setX(x).setVisible(x < 240);
+    }
+    const ops = st.op as number[];
+    const ans = st.ans as number;
+    const me = this.me<{ s: number; l: boolean }>(st);
+    this.opts.forEach((o, i) => {
+      o.g.clear();
+      o.t.setText(ops.length ? String(ops[i]) : '');
+      if (!ops.length) return;
+      const x = (i - 1) * 90;
+      const sel = me?.s === i;
+      const right = ans >= 0 && ops[i] === ans;
+      o.g.fillStyle(right ? 0x63c74d : sel ? (me?.l ? 0x2a6b3a : 0xfee761) : 0x0d0b14, 1).fillRect(x - 36, 28, 72, 44);
+      o.g.fillStyle(right ? 0x2a6b3a : UI.panelLight, 1).fillRect(x - 34, 30, 68, 40);
+    });
+    this.info.setText(fontText(`RONDA ${r + 1}/${C.rounds} · ${t < pickAt ? 'CUENTA LOS JAMONES (NO LAS LONCHAS)' : ans < 0 ? '¿CUÁNTOS JAMONES?' : `ERAN ${ans}`}`));
+    const ps = st.ps as Ps<{ sc: number }>;
+    const rows = Object.entries(ps)
+      .sort((a, b) => b[1].sc - a[1].sc)
+      .map(([id, p]) => [this.h.info(Number(id))?.name ?? '?', String(p.sc)] as [string, string]);
+    this.board(214, -84, rows, this.board_);
+  }
+
+  onKey(k: MgKey): void {
+    audio.play(k === 'a' ? 'click' : 'hover');
+  }
+
+  onPointer(x: number, y: number, st: St): MgKey[] {
+    const me = this.me<{ s: number }>(st);
+    if (!me || y < 20) return [];
+    const i = Math.max(0, Math.min(2, Math.round(x / 90) + 1));
+    const keys: MgKey[] = [];
+    for (let k = 0; k < (i - me.s + 3) % 3; k++) keys.push('r');
+    keys.push('a');
+    return keys;
   }
 }
 
@@ -862,5 +1141,9 @@ export function createView(id: MgId, h: ViewHost): MgView {
       return new ReflejosView(h);
     case 'ritmo':
       return new RitmoView(h);
+    case 'atrapa':
+      return new AtrapaView(h);
+    case 'cuenta':
+      return new CuentaView(h);
   }
 }

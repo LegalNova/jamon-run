@@ -1,4 +1,4 @@
-// Envoltorio de escritorio (opcional) para JAMÓN RUN.
+// Envoltorio de escritorio (opcional) para JAMONGUS.
 // Uso: npm run desktop   (compila y abre el juego en una ventana nativa)
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
@@ -12,7 +12,7 @@ function createWindow() {
     minWidth: 480,
     minHeight: 270,
     backgroundColor: '#0d0b14',
-    title: 'JAMÓN RUN',
+    title: 'JAMONGUS',
     autoHideMenuBar: true,
     show: !SMOKE,
     webPreferences: {

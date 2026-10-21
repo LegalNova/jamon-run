@@ -204,7 +204,7 @@ export class GameScene extends Phaser.Scene {
     // En los modos nuevos, la duración por defecto es la del modo si no se ha cambiado.
     const info = modeInfo(mode);
     const duration = mode === 'pilla' || settings.duration !== BALANCE.match.defaultDuration ? settings.duration : info.duration || settings.duration;
-    return new OfflineModel({ mode, mapId, scale: scaleFor(roster.length, mapId), duration, difficulty: settings.difficulty, roster }, pid);
+    return new OfflineModel({ mode, mapId, scale: scaleFor(roster.length, mapId), duration, difficulty: settings.difficulty, roster, paron: settings.paron }, pid);
   }
 
   /** Zoom entero según la ventana; si el mapa es más pequeño que la vista, queda centrado. */
@@ -910,6 +910,8 @@ export class GameScene extends Phaser.Scene {
       net: () => m.paron(),
       t: () => m.paronT(),
       input: (k) => m.mgInput(k),
+      bet: (c, a) => m.rouletteBet(c, a),
+      balance: () => account.lonchas,
       react: (e) => m.react(e),
       reactions: () => m.drainReactions(),
       info: (id) => {
