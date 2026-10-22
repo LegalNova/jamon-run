@@ -57,8 +57,10 @@ export interface Settings {
   paron: ParonLevel;
   /** Calidad gráfica: auto (baja sola si va lento), alta o baja. */
   quality: 'auto' | 'alta' | 'baja';
-  /** Vibración del mando. */
+  /** Vibración del mando y del móvil. */
   rumble: boolean;
+  /** Ya ha hecho el tutorial jugable de la primera vez. */
+  tutorialDone: boolean;
   duration: number;
   chasers: number;
   escapists: number;
@@ -78,6 +80,7 @@ function defaults(): Settings {
     paron: 'normal',
     quality: 'auto',
     rumble: true,
+    tutorialDone: false,
     duration: BALANCE.match.defaultDuration,
     chasers: BALANCE.match.defaultChasers,
     escapists: BALANCE.match.defaultEscapists,
@@ -106,6 +109,7 @@ function load(): Settings {
       paron: s.paron && s.paron in PARON.levels ? s.paron : d.paron,
       quality: s.quality === 'alta' || s.quality === 'baja' ? s.quality : 'auto',
       rumble: s.rumble === undefined ? true : !!s.rumble,
+      tutorialDone: !!s.tutorialDone,
       duration: (m.durationOptions as readonly number[]).includes(s.duration as number) ? (s.duration as number) : d.duration,
       chasers: Math.round(clamp(s.chasers, m.minChasers, m.maxChasers, d.chasers)),
       escapists: Math.round(clamp(s.escapists, m.minEscapists, m.maxEscapists, d.escapists)),

@@ -129,6 +129,12 @@ export class Button extends Phaser.GameObjects.Container implements Focusable {
     return this;
   }
 
+  /** Texto más grande (botón JUGAR de la portada). */
+  setLabelScale(k: number): this {
+    this.label.setScale(k);
+    return this;
+  }
+
   setEnabled(e: boolean): this {
     this.enabled = e;
     this.redraw();

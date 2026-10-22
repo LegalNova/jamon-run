@@ -24,7 +24,8 @@ export class BootScene extends Phaser.Scene {
     document.getElementById('loading')?.remove();
     this.scene.launch('Toast');
     startTouchControls(this);
-    this.scene.start('Title');
+    // Directo a la portada (logo, nombre y JUGAR).
+    this.scene.start('Menu');
   }
 
   private buildFullscreenIcon(): void {

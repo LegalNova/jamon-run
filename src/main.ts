@@ -28,6 +28,7 @@ import { RoleRevealScene } from './scenes/RoleRevealScene';
 import { TitleScene } from './scenes/TitleScene';
 import { UIScene } from './scenes/UIScene';
 import { TouchScene } from './core/touchControls';
+import { FirstStepsScene } from './scenes/FirstStepsScene';
 
 const game = new Phaser.Game({
   type: Phaser.AUTO,
@@ -62,6 +63,7 @@ const game = new Phaser.Game({
     RoleRevealScene,
     GameScene,
     UIScene,
+    FirstStepsScene,
     PauseScene,
     OptionsScene,
     ControlsScene,

@@ -37,6 +37,9 @@ export interface GameData {
   role?: Team;
   /** Partida online ya preparada (si no, se crea una partida offline con bots). */
   model?: GameModel;
+  /** Tutorial jugable de la primera vez (y adónde ir al acabar). */
+  tutorial?: boolean;
+  next?: string;
 }
 
 /** Atuendo de cada personaje según el modo y la ciudad. */
@@ -170,11 +173,16 @@ export class GameScene extends Phaser.Scene {
     audio.playMusic(this.track());
     this.scene.launch('UI');
     this.scene.bringToTop('UI');
+    if (this.data_.tutorial) {
+      this.scene.launch('FirstSteps', { next: this.data_.next ?? 'Menu' });
+      this.scene.bringToTop('FirstSteps');
+    }
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.cleanup());
     if (!this.model.online) this.time.delayedCall(10, () => this.events.emit('countdown', BALANCE.match.countdown));
   }
 
   private createOffline(): GameModel {
+    if (this.data_.tutorial) return this.createTutorial();
     const mode: ModeId = this.data_.mode ?? 'pilla';
     let role: Team = this.data_.role ?? 'escapist';
     const mapId: MapId = this.data_.mapId ?? 'forest';
@@ -209,6 +217,17 @@ export class GameScene extends Phaser.Scene {
     const info = modeInfo(mode);
     const duration = mode === 'pilla' || settings.duration !== BALANCE.match.defaultDuration ? settings.duration : info.duration || settings.duration;
     return new OfflineModel({ mode, mapId, scale: scaleFor(roster.length, mapId), duration, difficulty: settings.difficulty, roster, paron: settings.paron }, pid);
+  }
+
+  /** Tutorial: tú de perseguidor y dos muñecos quietos en la plaza (sin bots ni Parones). */
+  private createTutorial(): GameModel {
+    const roster: RosterEntry[] = [
+      { id: 0, team: 'chaser', name: profile.look.name, look: profile.look, human: true, cos: account.profile?.equipped ?? {}, streak: 0 },
+      // "human" sin mando = se quedan quietos.
+      { id: 1, team: 'escapist', name: 'MUÑECO', look: randomLook('MUÑECO'), human: true },
+      { id: 2, team: 'escapist', name: 'MUÑECA', look: randomLook('MUÑECA'), human: true },
+    ];
+    return new OfflineModel({ mode: 'pilla', mapId: 'plaza', scale: { sx: 1, sy: 1 }, duration: 300, difficulty: 'easy', roster, paron: 'no' }, 0);
   }
 
   /** Zoom entero según la ventana; si el mapa es más pequeño que la vista, queda centrado. */

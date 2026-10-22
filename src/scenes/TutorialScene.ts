@@ -8,11 +8,20 @@ import { modeInfo } from '../../shared/modes/rules';
 import type { ModeId } from '../../shared/sim/types';
 import { charKey, ensureCharTexture } from '../gfx/characters';
 import { FONT } from '../gfx/font';
-import { panel, text, UI } from '../ui/widgets';
+import { Button, Menu, panel, text, UI } from '../ui/widgets';
+import { keyName, settings } from '../config/settings';
+import { IS_TOUCH } from '../core/touch';
 import { Backdrop, fadeIn, fadeTo } from './common';
 import { MODE_COLORS, wrapWords } from './ModeSelectScene';
 
 const PW = 108;
+/** Cómo jugar: 3 frases cortas por modo (caben en la tarjeta). */
+const HOWTO: Record<ModeId, string[]> = {
+  pilla: ['ROJOS: HUID.', 'AZULES: PILLAD.', 'RESCATA AMIGOS.'],
+  infeccion: ['EMPIEZA UN ZOMBI.', 'SI TE TOCA, CAES.', 'SÉ EL ÚLTIMO.'],
+  bomba: ['PASA EL JAMÓN.', 'SI EXPLOTA: FUERA', 'GANA EL ÚLTIMO.'],
+  escondite: ['HAZTE UN OBJETO.', 'NO TE MUEVAS.', 'QUE NO TE PILLEN.'],
+};
 const PH = 128;
 
 /** Tutorial rápido de cada modo: 4 viñetas con dibujos animados. */
@@ -26,14 +35,27 @@ export class TutorialScene extends Phaser.Scene {
     super('Tutorial');
   }
 
-  init(data: { mode?: ModeId }): void {
+  /** "Cómo jugar": una tarjeta por modo (en vez de las 4 viñetas de un modo). */
+  private howto = false;
+  private tapped = false;
+  private menu: Menu | null = null;
+
+  init(data: { mode?: ModeId; howto?: boolean }): void {
     this.mode = data.mode ?? 'pilla';
+    this.howto = !!data.howto;
     this.t = 0;
+    this.tapped = false;
+    this.menu = null;
   }
 
   create(): void {
     fadeIn(this);
     this.backdrop = new Backdrop(this, false, 0.3);
+    if (this.howto) {
+      this.createHowto();
+      return;
+    }
+    this.input.on('pointerdown', () => (this.tapped = true));
     const info = modeInfo(this.mode);
     const accent = MODE_COLORS[this.mode];
     const title = text(this, VIEW_W / 2 + 10, 16, info.name, { scale: 2, color: accent });
@@ -58,7 +80,43 @@ export class TutorialScene extends Phaser.Scene {
       c.setScale(0);
       this.tweens.add({ targets: c, scale: 1.3, delay: 150 + i * 160, duration: 260, ease: 'Back.easeOut', onStart: () => audio.play('hover') });
     });
-    this.prompt = text(this, VIEW_W / 2, VIEW_H - 14, 'ENTER / ESPACIO: ¡ENTENDIDO!  ·  ESC: VOLVER', { color: 0xffffff });
+    this.prompt = text(this, VIEW_W / 2, VIEW_H - 14, IS_TOUCH ? 'TOCA PARA SEGUIR' : 'ENTER / ESPACIO: ¡ENTENDIDO!  ·  ESC: VOLVER', { color: 0xffffff });
+  }
+
+  /** CÓMO JUGAR: los 4 modos, cada uno con su dibujo, 3 frases y los controles de tu dispositivo. */
+  private createHowto(): void {
+    text(this, VIEW_W / 2, 14, 'CÓMO JUGAR', { scale: 2, color: UI.focusLight });
+    const modes: ModeId[] = ['pilla', 'infeccion', 'bomba', 'escondite'];
+    modes.forEach((m, i) => {
+      const info = modeInfo(m);
+      const accent = MODE_COLORS[m];
+      const x = VIEW_W / 2 + (i - 1.5) * (PW + 8);
+      const y = 112;
+      const g = this.add.graphics();
+      panel(g, x - PW / 2, y - PH / 2, PW, PH);
+      g.fillStyle(accent, 1).fillRect(x - PW / 2 + 1, y - PH / 2 + 1, PW - 2, 2);
+      g.fillStyle(0x0d0b14, 1).fillRect(x - PW / 2 + 6, y - PH / 2 + 18, PW - 12, 64);
+      text(this, x, y - PH / 2 + 10, info.name.replace(' JAMONERO', ''), { color: accent });
+      HOWTO[m].forEach((l, k) => text(this, x, y + 26 + k * 10, l, { color: UI.text }));
+      const c = this.add.container(x, y - PH / 2 + 52);
+      const keep = this.mode;
+      this.mode = m;
+      this.drawStep(c, 0);
+      this.mode = keep;
+      c.setScale(0);
+      this.tweens.add({ targets: c, scale: 1.3, delay: 150 + i * 160, duration: 260, ease: 'Back.easeOut' });
+    });
+    const b = settings.bindings;
+    const K = (k: string) => keyName(k);
+    const ctrl = IS_TOUCH
+      ? 'MOVER: JOYSTICK (IZQUIERDA) · BOTONES A LA DERECHA'
+      : input.lastDevice === 'gamepad'
+        ? 'MOVER: STICK · A: ACCIÓN · X: HABILIDAD · RB: SPRINT'
+        : `MOVER: ${K(b.up)}${K(b.left)}${K(b.down)}${K(b.right)} · ACCIÓN: ${K(b.action)} · HABILIDAD: ${K(b.special)} · SPRINT: ${K(b.sprint)}`;
+    text(this, VIEW_W / 2, 186, ctrl, { color: UI.focusLight });
+    this.menu = new Menu(true);
+    this.menu.add(new Button(this, VIEW_W / 2 - 66, VIEW_H - 22, 'PRACTICAR 30 S', () => fadeTo(this, 'Game', { tutorial: true }), 124, 18, UI.green));
+    this.menu.add(new Button(this, VIEW_W / 2 + 66, VIEW_H - 22, 'VOLVER', () => fadeTo(this, 'Menu'), 124, 18));
   }
 
   /** Dibujo animado de cada viñeta. */
@@ -207,13 +265,24 @@ export class TutorialScene extends Phaser.Scene {
     const dt = delta / 1000;
     this.t += dt;
     this.backdrop.update(dt);
+    if (this.howto) {
+      if (input.back()) {
+        audio.play('back');
+        fadeTo(this, 'Menu');
+        return;
+      }
+      this.menu?.update();
+      return;
+    }
     this.prompt.setAlpha(Math.floor(this.t * 2.5) % 2 === 0 ? 1 : 0.5);
     if (input.back()) {
       audio.play('back');
       fadeTo(this, 'ModeSelect');
       return;
     }
-    if (input.confirm()) {
+    const tap = this.tapped;
+    this.tapped = false;
+    if (input.confirm() || tap) {
       audio.play('click');
       fadeTo(this, 'MapSelect', { mode: this.mode });
     }

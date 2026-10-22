@@ -3,6 +3,7 @@ import { VIEW_H, VIEW_W } from '../config/balance';
 import { keyName, settings } from '../config/settings';
 import { audio } from '../core/audio';
 import { input } from '../core/input';
+import { IS_TOUCH } from '../core/touch';
 import { modeInfo } from '../../shared/modes/rules';
 import type { ModeId } from '../../shared/sim/types';
 import { ensureCharTexture, Team } from '../gfx/characters';
@@ -24,6 +25,8 @@ function wheelColors(mode: ModeId): { hunter: [number, number]; prey: [number, n
 const SEGMENTS = 8;
 const SEG = (Math.PI * 2) / SEGMENTS;
 const R = 64;
+/** Recordatorio antes de cada partida (ms) tras ver tu bando. */
+const REMINDER_MS = 2000;
 
 export class RoleRevealScene extends Phaser.Scene {
   private mapId: MapId = 'forest';
@@ -46,6 +49,8 @@ export class RoleRevealScene extends Phaser.Scene {
   }
 
   private online: OnlineModel | null = null;
+  private started = false;
+  private tapped = false;
   private revealMs = 0;
   private spinMs = 3600;
 
@@ -61,6 +66,8 @@ export class RoleRevealScene extends Phaser.Scene {
     this.phase = 'spin';
     this.t = 0;
     this.prompt = undefined;
+    this.started = false;
+    this.tapped = false;
   }
 
   create(): void {
@@ -131,7 +138,8 @@ export class RoleRevealScene extends Phaser.Scene {
       ease: 'Cubic.easeOut',
       onComplete: () => this.reveal(),
     });
-    this.footer = text(this, VIEW_W / 2, VIEW_H - 12, this.online ? 'PARTIDA ONLINE · EMPIEZA EN UN MOMENTO' : 'ENTER: SALTAR · ESC: VOLVER', { color: UI.muted });
+    this.footer = text(this, VIEW_W / 2, VIEW_H - 12, this.online ? 'PARTIDA ONLINE · EMPIEZA EN UN MOMENTO' : IS_TOUCH ? 'TOCA PARA SALTAR' : 'ENTER: SALTAR · ESC: VOLVER', { color: UI.muted });
+    this.input.on('pointerdown', () => (this.tapped = true));
     if (this.online) {
       const model = this.online;
       this.time.delayedCall(Math.max(this.spinMs + 900, this.revealMs - 150), () => fadeTo(this, 'Game', { model }));
@@ -203,18 +211,27 @@ export class RoleRevealScene extends Phaser.Scene {
       bomba: [`${K(b.action)}: DASH PARA PASARLA`],
       escondite: chaser ? [`${K(b.action)}: JAMONAZO`] : [`${K(b.special)}: DISFRAZ · ${K(b.rotate)}: GIRAR · SHIFT: QUIETO`],
     };
-    ctrl[mode].forEach((l, i) => text(this, cx, 174 + i * 10, l, { color: UI.focusLight }));
+    // En el móvil, los nombres de los botones táctiles.
+    const touchCtrl: Record<ModeId, string> = {
+      pilla: chaser ? 'BOTÓN GOLPE · BOTÓN LANZAR' : 'BOTÓN DASH · BOTÓN HUMO',
+      infeccion: chaser ? 'BOTÓN GOLPE: ABALANZARSE' : 'BOTÓN DASH · BOTÓN OBJETO',
+      bomba: 'BOTÓN DASH PARA PASARLA',
+      escondite: chaser ? 'BOTÓN GOLPE: JAMONAZO' : 'DISFRAZ · GIRAR · QUIETO',
+    };
+    (IS_TOUCH ? [touchCtrl[mode]] : ctrl[mode]).forEach((l, i) => text(this, cx, 174 + i * 10, l, { color: UI.focusLight }));
     const total = this.online ? this.online.roster.length : settings.chasers + settings.escapists;
     const nCh = this.online ? this.online.roster.filter((r) => r.team === 'chaser').length : mode === 'pilla' ? settings.chasers : 0;
     const vs = mode === 'bomba' ? `${total} JUGADORES · QUEDA UNO` : mode === 'pilla' ? `${nCh} AZULES VS ${total - nCh} ROJOS` : `${info.hunters} VS ${info.prey}`;
     text(this, cx, 186, vs, { color: UI.muted });
-    text(this, cx, 204, '¡ATENTO AL PARÓN DOPAMINA A MITAD DE PARTIDA!', { color: 0xff7ab8 });
+    text(this, cx, 204, '¡ATENTO A LOS PARONES!', { color: 0xff7ab8 });
 
     this.time.delayedCall(450, () => {
       this.phase = 'ready';
       if (!this.online) {
         this.footer?.setVisible(false);
-        this.prompt = text(this, VIEW_W / 2, VIEW_H - 12, 'ENTER / ESPACIO: ¡A JUGAR!', { color: 0xffffff });
+        this.prompt = text(this, VIEW_W / 2, VIEW_H - 12, IS_TOUCH ? 'TOCA PARA JUGAR YA' : 'ENTER / ESPACIO: ¡A JUGAR YA!', { color: 0xffffff });
+        // Recordatorio de 2 s y a jugar solo.
+        this.time.delayedCall(REMINDER_MS, () => this.start());
       }
     });
   }
@@ -237,13 +254,21 @@ export class RoleRevealScene extends Phaser.Scene {
       fadeTo(this, 'MapSelect', { mode: this.mode });
       return;
     }
-    if (input.confirm()) {
+    const tap = this.tapped;
+    this.tapped = false;
+    if (input.confirm() || tap) {
       if (this.phase === 'spin') {
         this.spin.seek(this.spinMs - 10);
       } else if (this.phase === 'ready') {
         audio.play('click');
-        fadeTo(this, 'Game', { mode: this.mode, mapId: this.mapId, role: this.role });
+        this.start();
       }
     }
+  }
+
+  private start(): void {
+    if (this.started || this.online) return;
+    this.started = true;
+    fadeTo(this, 'Game', { mode: this.mode, mapId: this.mapId, role: this.role });
   }
 }
