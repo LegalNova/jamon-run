@@ -16,7 +16,9 @@
     "check:maps": "esbuild scripts/check-maps.ts --bundle --platform=node --log-level=warning | node",
     "desktop": "vite build && npx --yes electron@33.4.11 .",
     "desktop:test": "vite build && JAMON_SMOKE_TEST=1 npx --yes electron@33.4.11 .",
-    "package": "vite build && npx --yes @electron/packager@18.4.4 . \"JAMONGUS\" --out=release --overwrite --electron-version=33.4.11 --ignore=^/src --ignore=^/scripts --ignore=^/release --ignore=^/node_modules --ignore=^/\\.claude --ignore=^/index\\.html --ignore=^/tsconfig\\.json --ignore=^/vite\\.config\\.ts --ignore=^/README\\.md"
+    "package": "vite build && npx --yes @electron/packager@18.4.4 . \"JAMONGUS\" --out=release --overwrite --electron-version=33.4.11 --ignore=^/src --ignore=^/scripts --ignore=^/release --ignore=^/node_modules --ignore=^/\\.claude --ignore=^/index\\.html --ignore=^/tsconfig\\.json --ignore=^/vite\\.config\\.ts --ignore=^/README\\.md",
+    "bench:tick": "esbuild scripts/tick-bench.ts --bundle --platform=node --log-level=warning --outfile=node_modules/.cache/tick-bench.cjs && node node_modules/.cache/tick-bench.cjs",
+    "loadtest": "node scripts/loadtest.mjs"
   },
   "dependencies": {
     "phaser": "3.90.0"
@@ -26,6 +28,7 @@
     "concurrently": "^9.2.5",
     "typescript": "5.9.3",
     "vite": "6.4.4",
-    "wrangler": "^4.151.3"
+    "wrangler": "^4.151.3",
+    "ws": "^8.21.0"
   }
 }

@@ -171,8 +171,15 @@ export type AIParams = (typeof BALANCE.ai)[Difficulty];
 export const NET = {
   /** Ticks por segundo del servidor (simulación autoritativa). */
   tickRate: 20,
-  /** Máximo de mensajes de entrada por segundo que envía cada cliente. */
-  inputRate: 15,
+  /** Máximo de mensajes de entrada por segundo que envía cada cliente (solo si cambia algo). */
+  inputRate: 10,
+  /** Ping de mantenimiento (lo contesta Cloudflare sin despertar a la sala) y ping con hora (para el reloj). */
+  pingEveryMs: 2000,
+  clockPingEveryMs: 10000,
+  /** Si no llega nada en este tiempo, la conexión se da por perdida (ms). */
+  deadAfterMs: 5000,
+  /** Límites por jugador en el servidor. */
+  limits: { msgsPerSec: 30, kickPerSec: 90, inputsPerSec: 14, maxMsgBytes: 4096, settingsPerSec: 4, lookPerSec: 2 },
   maxPlayers: 20,
   roomCodeLength: 5,
   /** Segundos que se guarda el sitio a un jugador desconectado. */

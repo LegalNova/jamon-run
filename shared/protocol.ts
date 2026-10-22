@@ -128,7 +128,7 @@ export type ClientMsg =
   | { t: 'settings'; s: Partial<RoomSettings> }
   | { t: 'start' }
   /** Entrada: dirección (-100..100), sprint, contadores de pulsaciones (acción, especial, girar, ruleta). */
-  | { t: 'in'; x: number; y: number; r: number; a: number; b: number; o?: number; q?: number }
+  // (la entrada de movimiento va en binario: ver netcodec.ts)
   | { t: 'vote'; m: ModeId }
   | { t: 'say'; p: number }
   | { t: 'emo' }

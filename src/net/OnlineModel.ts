@@ -1,4 +1,15 @@
 import { BALANCE, HYPE, NET } from '../../shared/balance';
+import { encodeInput } from '../../shared/netcodec';
+
+/** Dirección redondeada a 16 ángulos y a media o máxima velocidad (teclado: ya es exacta). */
+function quantizeMove(mx: number, my: number): { x: number; y: number } {
+  const len = Math.hypot(mx, my);
+  if (len < 0.15) return { x: 0, y: 0 };
+  const step = Math.PI / 8;
+  const a = Math.round(Math.atan2(my, mx) / step) * step;
+  const m = len > 0.65 ? 1 : 0.5;
+  return { x: Math.cos(a) * m, y: Math.sin(a) * m };
+}
 import { resolveCircle } from '../../shared/collision';
 import { Grid } from '../../shared/grid';
 import type { MapId } from '../../shared/maps';
@@ -425,7 +436,9 @@ export class OnlineModel implements GameModel {
   // ------------------------------------------------------------------ entrada
 
   setHeld(h: HeldInput): void {
-    this.held = h;
+    // La predicción usa lo mismo que recibe el servidor (si no, habría correcciones).
+    const q = quantizeMove(h.mx, h.my);
+    this.held = { mx: q.x, my: q.y, sprint: h.sprint };
   }
 
   press(what: 'action' | 'special' | 'rotate' | 'spin'): void {
@@ -451,8 +464,9 @@ export class OnlineModel implements GameModel {
     net.sendMsg({ t: 'emo' });
   }
 
-  /** Envía la entrada solo si ha cambiado, y como mucho 15 veces por segundo. */
+  /** Envía la entrada (8 bytes) solo si ha cambiado, y como mucho 10 veces por segundo. */
   private sendInput(): void {
+    // (held ya va redondeado a 16 direcciones: ver setHeld y quantizeMove.)
     const x = Math.round(this.held.mx * 100);
     const y = Math.round(this.held.my * 100);
     const r = this.held.sprint ? 1 : 0;
@@ -463,7 +477,7 @@ export class OnlineModel implements GameModel {
     if (now - this.lastSendAt < INPUT_INTERVAL) return;
     this.lastSendAt = now;
     this.lastSent = { x, y, r, a: this.aCount, b: this.bCount, o: this.oCount, q: this.qCount };
-    net.sendMsg({ t: 'in', x, y, r, a: this.aCount, b: this.bCount, o: this.oCount, q: this.qCount });
+    net.sendBinary(encodeInput({ x: x / 100, y: y / 100, sprint: r === 1, a: this.aCount, b: this.bCount, o: this.oCount, q: this.qCount }));
   }
 
   destroy(): void {

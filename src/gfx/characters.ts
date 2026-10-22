@@ -845,9 +845,28 @@ export const CHAR_FRAMES = Object.keys(POSES);
  * Devuelve (y crea si hace falta) la textura animada de un personaje.
  * team = null para la vista previa sin uniforme.
  */
+/**
+ * Texturas de personajes creadas al vuelo (cada bot tiene un aspecto al azar): se apunta en qué
+ * "generación" (partida) se usaron por última vez para poder borrarlas y que no crezca la memoria.
+ */
+const charGen = new Map<string, number>();
+let generation = 0;
+
+/** Al empezar una partida: borra las texturas de personajes que no se usaron ni en esta ni en la anterior. */
+export function newCharGeneration(scene: Phaser.Scene): void {
+  generation++;
+  for (const [key, g] of charGen) {
+    if (g >= generation - 1) continue;
+    for (const dir of ['down', 'up', 'side']) for (const suffix of ['idle', 'run', 'atk', 'hurt']) scene.anims.remove(`${key}_${dir}_${suffix}`);
+    if (scene.textures.exists(key)) scene.textures.remove(key);
+    charGen.delete(key);
+  }
+}
+
 export function ensureCharTexture(scene: Phaser.Scene, team: Team | null, look: Look, outfit?: Outfit): string {
   const o: Outfit = outfit ?? (team === 'escapist' ? 'guchi' : team === 'chaser' ? 'blue' : 'casual');
   const key = `chr_${o === 'guchi' ? 'escapist' : o === 'blue' ? 'chaser' : o === 'casual' ? 'none' : o}_${lookKey(look)}`;
+  if (charGen.has(key) || !scene.textures.exists(key)) charGen.set(key, generation);
   if (scene.textures.exists(key)) return key;
   const frames: { name: string; grid: PixelGrid }[] = [];
   for (const dir of ['down', 'up', 'side'] as Dir[]) {

@@ -120,18 +120,33 @@ class NetClient {
       this.lastMsgAt = performance.now();
       this.sendMsg({ t: 'hello', pid: tabPid(), look: profile.look, acct: playerId() });
       this.sendPing();
+      this.lastClockPing = performance.now();
       if (this.pingTimer) clearInterval(this.pingTimer);
       this.pingTimer = setInterval(() => {
         // Conexión muerta sin aviso (wifi caída, etc.): no llega nada desde hace rato.
-        if (performance.now() - this.lastMsgAt > 4000) {
+        if (performance.now() - this.lastMsgAt > NET.deadAfterMs) {
           this.dropped(ws, 1006);
           return;
         }
-        this.sendPing();
-      }, 1000);
+        // Casi siempre un "ping" de texto (lo contesta Cloudflare sin despertar la sala);
+        // de vez en cuando uno con hora, para ajustar el reloj del servidor.
+        if (performance.now() - this.lastClockPing >= NET.clockPingEveryMs) {
+          this.lastClockPing = performance.now();
+          this.sendPing();
+        } else this.sendRawPing();
+      }, NET.pingEveryMs);
     };
     ws.onmessage = (ev) => {
       if (this.ws !== ws) return;
+      if (ev.data === 'pong') {
+        this.lastMsgAt = performance.now();
+        if (this.rawPingAt) {
+          const rtt = performance.now() - this.rawPingAt;
+          this.rawPingAt = 0;
+          this.ping = this.ping ? this.ping * 0.8 + rtt * 0.2 : rtt;
+        }
+        return;
+      }
       let msg: ServerMsg;
       try {
         msg = JSON.parse(ev.data as string) as ServerMsg;
@@ -228,6 +243,28 @@ class NetClient {
 
   private sendPing(): void {
     this.sendMsg({ t: 'ping', c: performance.now() });
+  }
+
+  private rawPingAt = 0;
+  private lastClockPing = 0;
+
+  private sendRawPing(): void {
+    const ws = this.ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    delayed(() => {
+      if (ws.readyState !== WebSocket.OPEN) return;
+      this.rawPingAt = performance.now();
+      ws.send('ping');
+    });
+  }
+
+  /** Mensaje binario (la entrada del jugador). */
+  sendBinary(buf: ArrayBuffer): void {
+    const ws = this.ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    delayed(() => {
+      if (ws.readyState === WebSocket.OPEN) ws.send(buf);
+    });
   }
 
   sendMsg(msg: ClientMsg): void {

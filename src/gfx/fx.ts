@@ -187,15 +187,22 @@ export class Fx {
     this.ring(x, y, color, 18);
   }
 
+  /** Objetos reutilizables (anillos y textos flotantes): no se crean y destruyen a cada golpe. */
+  private ringPool: Phaser.GameObjects.Image[] = [];
+  private textPool: Phaser.GameObjects.BitmapText[] = [];
+
   ring(x: number, y: number, color: number, size = 20): void {
-    const r = this.scene.add.image(x, y, 'p_ring').setTint(color).setDepth(7998).setScale(0.3);
+    const r = (this.ringPool.pop() ?? this.scene.add.image(0, 0, 'p_ring')).setPosition(x, y).setTint(color).setDepth(7998).setScale(0.3).setAlpha(1).setVisible(true);
     this.scene.tweens.add({
       targets: r,
       scale: size / 16,
       alpha: 0,
       duration: 320,
       ease: 'Quad.easeOut',
-      onComplete: () => r.destroy(),
+      onComplete: () => {
+        r.setVisible(false);
+        this.ringPool.push(r);
+      },
     });
   }
 
@@ -229,8 +236,11 @@ export class Fx {
   }
 
   float(x: number, y: number, text: string, color: number, big = false): void {
-    const t = this.scene.add
-      .bitmapText(Math.round(x), Math.round(y), FONT, fontText(text))
+    const t = (this.textPool.pop() ?? this.scene.add.bitmapText(0, 0, FONT, ''))
+      .setText(fontText(text))
+      .setPosition(Math.round(x), Math.round(y))
+      .setAlpha(1)
+      .setVisible(true)
       .setOrigin(0.5, 1)
       .setTint(color)
       .setDepth(9500)
@@ -248,7 +258,10 @@ export class Fx {
       alpha: 0,
       delay: 450,
       duration: 300,
-      onComplete: () => t.destroy(),
+      onComplete: () => {
+        t.setVisible(false);
+        this.textPool.push(t);
+      },
     });
   }
 }

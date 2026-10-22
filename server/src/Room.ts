@@ -19,6 +19,7 @@ import {
   STATES,
 } from '../../shared/protocol';
 import { Sim } from '../../shared/sim/Sim';
+import { counterDelta, decodeInput, InputPacket } from '../../shared/netcodec';
 import { MgBag, MgId, MgKey, Paron } from '../../shared/minigames';
 import { secureRandom } from '../../shared/minigames/rng';
 import { MG, PARON } from '../../shared/balance';
@@ -51,9 +52,51 @@ interface Player {
   /** Ping que dice tener (para compensar en los minijuegos; con tope). */
   ping: number;
   reactAt: number;
-  /** Control de ritmo de mensajes de entrada. */
-  winStart: number;
-  winCount: number;
+  /** Control de ritmo de mensajes: ventana de 1 s por tipo. */
+  rate: Map<string, { t: number; n: number }>;
+}
+
+/** Lo que se guarda en cada WebSocket para recuperar la sala si Cloudflare la hiberna. */
+interface Attachment {
+  pid: string;
+  id: number;
+  look: Look;
+  acct: string;
+  ready: boolean;
+  vote: ModeId | null;
+}
+
+/** Datos de la sala que sobreviven a la hibernación. */
+interface Meta {
+  code: string;
+  settings: RoomSettings;
+  hostId: number;
+  nextId: number;
+}
+
+function makePlayer(id: number, pid: string, look: Look, acct: string, ws: WebSocket | null): Player {
+  return {
+    id,
+    pid,
+    name: look.name,
+    look,
+    ready: false,
+    ws,
+    connected: !!ws,
+    leftAt: 0,
+    held: { mx: 0, my: 0, sprint: false },
+    aCount: -1,
+    bCount: -1,
+    oCount: -1,
+    qCount: -1,
+    vote: null,
+    acct,
+    ping: 80,
+    reactAt: 0,
+    cos: {},
+    streak: 0,
+    rate: new Map(),
+  };
 }
 
 const TICK_MS = 1000 / NET.tickRate;
@@ -61,7 +104,11 @@ const SUBSTEPS = Math.round(60 / NET.tickRate);
 const REVEAL_MS = 5200;
 const RESULTS_DELAY_MS = 2800;
 
-/** Una sala: lobby + partida autoritativa. Un Durable Object por código. */
+/**
+ * Una sala: lobby + partida autoritativa. Un Durable Object por código.
+ * Usa la API de hibernación de WebSockets: en el lobby, sin partida, Cloudflare puede dormir
+ * la sala sin cortar las conexiones (y los pings los contesta sin despertarla).
+ */
 export class Room extends DurableObject<Env> {
   private code = '';
   private players: Player[] = [];
@@ -88,6 +135,45 @@ export class Room extends DurableObject<Env> {
   private revealUntil = 0;
   private endedAt = 0;
 
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    // Los pings de mantenimiento los contesta Cloudflare sin despertar la sala (ni gastar tiempo).
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
+    // Si la sala estaba hibernada, recupera ajustes y jugadores conectados.
+    void ctx.blockConcurrencyWhile(async () => {
+      const meta = await ctx.storage.get<Meta>('meta');
+      if (meta) {
+        this.code = meta.code;
+        this.settings = meta.settings;
+        this.hostId = meta.hostId;
+        this.nextId = meta.nextId;
+      }
+      for (const ws of ctx.getWebSockets()) {
+        const a = ws.deserializeAttachment() as Attachment | null;
+        if (!a || this.players.some((p) => p.id === a.id)) continue;
+        const p = makePlayer(a.id, a.pid, a.look, a.acct, ws);
+        p.ready = a.ready;
+        p.vote = a.vote;
+        this.players.push(p);
+        this.nextId = Math.max(this.nextId, a.id + 1);
+      }
+    });
+  }
+
+  private saveMeta(): void {
+    if (!this.code) return;
+    void this.ctx.storage.put('meta', { code: this.code, settings: this.settings, hostId: this.hostId, nextId: this.nextId } satisfies Meta);
+  }
+
+  /** Guarda en su WebSocket lo necesario para recuperarlo tras hibernar. */
+  private attach(p: Player): void {
+    try {
+      p.ws?.serializeAttachment({ pid: p.pid, id: p.id, look: p.look, acct: p.acct, ready: p.ready, vote: p.vote } satisfies Attachment);
+    } catch {
+      /* cerrado */
+    }
+  }
+
   async fetch(req: Request): Promise<Response> {
     const url = new URL(req.url);
     if (req.headers.get('Upgrade') !== 'websocket') return new Response('Se esperaba un WebSocket', { status: 426 });
@@ -95,30 +181,88 @@ export class Room extends DurableObject<Env> {
     if (!this.code) this.code = code;
     // La primera persona que entra desde "partida rápida" hace pública la sala.
     if (url.searchParams.get('pub') === '1' && this.players.length === 0) this.settings.isPublic = true;
+    this.saveMeta();
 
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
-    server.accept();
-    let player: Player | null = null;
-    server.addEventListener('message', (ev) => {
-      let msg: ClientMsg;
-      try {
-        msg = JSON.parse(typeof ev.data === 'string' ? ev.data : '') as ClientMsg;
-      } catch {
-        return;
-      }
-      if (!player) {
-        if (msg.t === 'hello') player = this.join(server, msg.pid, msg.look, msg.acct);
-        return;
-      }
-      this.onMessage(player, msg);
-    });
-    const close = () => {
-      if (player && player.ws === server) this.disconnect(player);
-    };
-    server.addEventListener('close', close);
-    server.addEventListener('error', close);
+    this.ctx.acceptWebSocket(server);
     return new Response(null, { status: 101, webSocket: client });
+  }
+
+  /** ¿Puede este jugador mandar otro mensaje de este tipo en este segundo? */
+  private allow(p: Player, key: string, perSec: number): boolean {
+    const now = Date.now();
+    let r = p.rate.get(key);
+    if (!r || now - r.t >= 1000) {
+      r = { t: now, n: 0 };
+      p.rate.set(key, r);
+    }
+    return ++r.n <= perSec;
+  }
+
+  async webSocketMessage(ws: WebSocket, data: string | ArrayBuffer): Promise<void> {
+    const L = NET.limits;
+    const player = this.players.find((p) => p.ws === ws) ?? null;
+    if (player) {
+      // Quien inunda la sala se queda fuera; lo que pase del límite se ignora.
+      if (!this.allow(player, 'kick', L.kickPerSec)) {
+        try {
+          ws.close(4008, 'Demasiados mensajes');
+        } catch {
+          /* ya cerrado */
+        }
+        return;
+      }
+      if (!this.allow(player, 'all', L.msgsPerSec)) return;
+    }
+    if (typeof data !== 'string') {
+      const inp = player ? decodeInput(data) : null;
+      if (player && inp) this.onInput(player, inp);
+      return;
+    }
+    if (data.length > L.maxMsgBytes) return;
+    let msg: ClientMsg;
+    try {
+      msg = JSON.parse(data) as ClientMsg;
+    } catch {
+      return;
+    }
+    if (!msg || typeof msg !== 'object' || typeof msg.t !== 'string') return;
+    if (!player) {
+      if (msg.t === 'hello') this.join(ws, msg.pid, msg.look, msg.acct);
+      return;
+    }
+    this.onMessage(player, msg);
+  }
+
+  async webSocketClose(ws: WebSocket, code: number): Promise<void> {
+    const p = this.players.find((x) => x.ws === ws);
+    if (p) this.disconnect(p);
+    try {
+      ws.close(code === 1005 || code === 1006 ? 1000 : code, 'Adiós');
+    } catch {
+      /* ya cerrado */
+    }
+  }
+
+  async webSocketError(ws: WebSocket): Promise<void> {
+    const p = this.players.find((x) => x.ws === ws);
+    if (p) this.disconnect(p);
+  }
+
+  /** Entrada binaria (ver shared/netcodec.ts): como mucho ~10 por segundo. */
+  private onInput(p: Player, inp: InputPacket): void {
+    if (!this.allow(p, 'in', NET.limits.inputsPerSec)) return;
+    p.held = { mx: inp.x, my: inp.y, sprint: inp.sprint };
+    this.sim?.setHeld(p.id, p.held);
+    if (counterDelta(p.aCount, inp.a)) this.sim?.press(p.id, 'action');
+    if (counterDelta(p.bCount, inp.b)) this.sim?.press(p.id, 'special');
+    if (counterDelta(p.oCount, inp.o)) this.sim?.press(p.id, 'rotate');
+    if (counterDelta(p.qCount, inp.q)) this.sim?.press(p.id, 'spin');
+    p.aCount = inp.a;
+    p.bCount = inp.b;
+    p.oCount = inp.o;
+    p.qCount = inp.q;
   }
 
   // ------------------------------------------------------------------ jugadores
@@ -147,32 +291,12 @@ export class Room extends DurableObject<Env> {
         return null;
       }
       const look = sanitizeLook(rawLook, `JUGADOR ${this.nextId}`);
-      p = {
-        id: this.nextId++,
-        pid,
-        name: look.name,
-        look,
-        ready: false,
-        ws,
-        connected: true,
-        leftAt: 0,
-        held: { mx: 0, my: 0, sprint: false },
-        aCount: 0,
-        bCount: 0,
-        oCount: 0,
-        qCount: 0,
-        vote: null,
-        acct: validAccount(acct) ? acct : '',
-        ping: 80,
-        reactAt: 0,
-        cos: {},
-        streak: 0,
-        winStart: 0,
-        winCount: 0,
-      };
+      p = makePlayer(this.nextId++, pid, look, validAccount(acct) ? acct : '', ws);
       this.players.push(p);
     }
     if (this.hostId < 0 || !this.players.some((x) => x.id === this.hostId && x.connected)) this.hostId = p.id;
+    this.attach(p);
+    this.saveMeta();
     void this.loadCosmetics(p);
     this.send(ws, { t: 'welcome', you: p.id, code: this.code });
     // Si hay partida en marcha y este jugador está en ella, vuelve a recibirla.
@@ -204,43 +328,22 @@ export class Room extends DurableObject<Env> {
       void this.report();
     }
     if (!this.players.some((p) => p.connected)) this.stopLoop(true);
+    // Sala vacía: se borra lo guardado (la sala deja de existir hasta que alguien vuelva a entrar).
+    if (!this.players.length) void this.ctx.storage.deleteAll();
   }
 
   private pickHost(): void {
     const next = this.players.find((p) => p.connected);
     this.hostId = next ? next.id : -1;
+    this.saveMeta();
   }
 
   // ------------------------------------------------------------------ mensajes
 
   private onMessage(p: Player, msg: ClientMsg): void {
     switch (msg.t) {
-      case 'in': {
-        // Máximo ~20 mensajes por segundo y jugador.
-        const now = Date.now();
-        if (now - p.winStart > 1000) {
-          p.winStart = now;
-          p.winCount = 0;
-        }
-        if (++p.winCount > 25) return;
-        const clamp = (v: unknown) => Math.max(-100, Math.min(100, Math.round(Number(v) || 0))) / 100;
-        p.held = { mx: clamp(msg.x), my: clamp(msg.y), sprint: msg.r === 1 };
-        this.sim?.setHeld(p.id, p.held);
-        const a = Math.floor(Number(msg.a) || 0);
-        const b = Math.floor(Number(msg.b) || 0);
-        const o = Math.floor(Number(msg.o) || 0);
-        const q = Math.floor(Number(msg.q) || 0);
-        if (a > p.aCount) this.sim?.press(p.id, 'action');
-        if (b > p.bCount) this.sim?.press(p.id, 'special');
-        if (o > p.oCount) this.sim?.press(p.id, 'rotate');
-        if (q > p.qCount) this.sim?.press(p.id, 'spin');
-        p.aCount = Math.max(p.aCount, a);
-        p.bCount = Math.max(p.bCount, b);
-        p.oCount = Math.max(p.oCount, o);
-        p.qCount = Math.max(p.qCount, q);
-        break;
-      }
       case 'say': {
+        if (!this.allow(p, 'say', 3)) break;
         const sim = this.sim;
         const c = sim?.byId.get(p.id);
         if (!sim || !c) break;
@@ -257,11 +360,7 @@ export class Room extends DurableObject<Env> {
         const pr = this.paron;
         if (!pr || !['a', 'b', 'l', 'r'].includes(msg.k)) break;
         const now = Date.now();
-        if (now - p.winStart > 1000) {
-          p.winStart = now;
-          p.winCount = 0;
-        }
-        if (++p.winCount > 40) break;
+        if (!this.allow(p, 'mi', 40)) break;
         if (typeof msg.p === 'number' && Number.isFinite(msg.p)) p.ping = Math.max(0, Math.min(400, msg.p));
         const ahead = Math.min(0.05, (now - this.paronTickAt) / 1000);
         pr.input(p.id, msg.k as MgKey, Math.min(0.15, p.ping / 2000) - ahead);
@@ -281,34 +380,39 @@ export class Room extends DurableObject<Env> {
         break;
       }
       case 'vote':
-        if (this.phase === 'lobby' && validMode(msg.m)) {
+        if (this.phase === 'lobby' && validMode(msg.m) && this.allow(p, 'vote', 4)) {
           p.vote = msg.m;
+          this.attach(p);
           this.broadcastLobby();
         }
         break;
       case 'ping':
-        if (p.ws) this.send(p.ws, { t: 'pong', c: Number(msg.c) || 0, ts: Date.now() });
+        if (p.ws && this.allow(p, 'ping', 4)) this.send(p.ws, { t: 'pong', c: Number(msg.c) || 0, ts: Date.now() });
         break;
       case 'look':
+        if (!this.allow(p, 'look', NET.limits.lookPerSec)) break;
         p.look = sanitizeLook(msg.look, p.name);
         p.name = p.look.name;
+        this.attach(p);
         this.broadcastLobby();
         break;
       case 'ready':
-        if (this.phase === 'lobby') {
+        if (this.phase === 'lobby' && this.allow(p, 'ready', 4)) {
           p.ready = !!msg.v;
+          this.attach(p);
           this.broadcastLobby();
         }
         break;
       case 'settings':
-        if (p.id === this.hostId && this.phase === 'lobby') {
+        if (p.id === this.hostId && this.phase === 'lobby' && msg.s && typeof msg.s === 'object' && this.allow(p, 'settings', NET.limits.settingsPerSec)) {
           this.applySettings(msg.s);
+          this.saveMeta();
           this.broadcastLobby();
           void this.report();
         }
         break;
       case 'start':
-        if (p.id === this.hostId && this.phase === 'lobby') this.startMatch();
+        if (p.id === this.hostId && this.phase === 'lobby' && this.allow(p, 'start', 1)) this.startMatch();
         break;
       case 'leave':
         p.leftAt = 0;

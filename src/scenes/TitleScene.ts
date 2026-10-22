@@ -7,7 +7,7 @@ import { text, UI } from '../ui/widgets';
 import { applyFullscreen, Backdrop, fadeIn, fadeTo } from './common';
 import { mobileFullscreen } from '../core/touchControls';
 
-/** Crea el logo "JAMÓN RUN" con letras sueltas que ondulan. */
+/** Crea el logo "JAMONGUS" con letras sueltas que ondulan. */
 export function createLogo(scene: Phaser.Scene, cx: number, cy: number, scale: number): Phaser.GameObjects.BitmapText[] {
   const word = 'JAMONGUS';
   const letters: Phaser.GameObjects.BitmapText[] = [];

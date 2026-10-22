@@ -5,11 +5,13 @@ Pilla-pilla por equipos en vista cenital, en pixel art, con **4 modos de juego**
 - **Lonchas** (la moneda del juego), misiones diarias y nivel.
 - Una **tienda** de cosméticos.
 - Monedas con combos, medallas y dos tiradas de la ruleta por partida, más tu propia tirada.
-- El **Parón Dopamina**: a mitad de partida todo se congela y toca uno de **8 minijuegos**.
+- Los **Parones Dopamina**: 2 o 3 veces por partida todo se congela y toca uno de **8 minijuegos** (a veces dos seguidos: ¡Parón Doble!).
+- Dos **eventos** aparte: la **Ruleta** (rojo, negro o verde, con tus lonchas) y la **Carrera de caballos**.
+- Se juega en **ordenador, móvil y tablet**: controles táctiles con joystick, y se puede instalar como app (PWA).
 
 Todo se genera por código: sprites, tiles, fuente, partículas, efectos de sonido, música (Web Audio en estilo 8-bit) y voces (Web Speech). No hay ni un solo asset externo.
 
-**Jugar online:** https://jamon-run.jamon-run.workers.dev
+**Jugar online:** https://jamongus.jamon-run.workers.dev (la dirección antigua, `jamon-run.jamon-run.workers.dev`, redirige aquí y conserva tus lonchas).
 
 **Tecnología:** Phaser 3.90 + TypeScript + Vite en el cliente; Cloudflare Workers + Durable Objects (plan gratuito) en el servidor. Opcionalmente, Electron para usarlo como app de escritorio.
 
@@ -65,7 +67,9 @@ gh secret set CLOUDFLARE_ACCOUNT_ID    # aparece en `npx wrangler whoami`
 
 Sin esos secretos, el workflow compila igualmente y avisa de que no despliega.
 
-El plan gratuito de Cloudflare da para jugar de sobra con amigos: unas 2 horas diarias de partidas de 20 personas con la sala llena, y mucho más con menos gente.
+Cuánto da de sí el plan gratuito, con la prueba de carga de 50 jugadores: ver **Servidor, rendimiento y plan gratuito** más abajo.
+
+**Cambio de nombre (JAMON RUN → JAMONGUS):** el Worker nuevo se llama `jamongus`. El antiguo (`jamon-run`) se despliega con `npx wrangler deploy --env legacy` y solo redirige (301) a la dirección nueva; los perfiles con lonchas se traspasan solos la primera vez que entras en la nueva.
 
 ### App de escritorio (opcional, Electron)
 
@@ -101,76 +105,50 @@ Electron no está entre las dependencias del proyecto: estos comandos lo bajan c
   - **Online**, el servidor de la sala calcula lo que ganas: no se puede trucar desde el navegador.
   - **Offline** (bots y Sala de minijuegos) el resultado lo calcula tu navegador, así que tiene **topes**: por partida, por día y con un tiempo mínimo entre partidas.
 
-## Parón Dopamina
+## Parones Dopamina y eventos
 
-- **Cuándo:** una vez por partida, en un momento al azar entre el **30% y el 70%** del tiempo (en Jamón Bomba, entre los segundos 45 y 110).
-- **La partida se congela para todos a la vez:**
-  - nadie se mueve ni recibe golpes;
-  - el reloj se para, igual que las mechas, las ruletas y los objetos.
-- **Cómo funciona online:** lo decide el servidor, así que todos entran y salen a la vez, sin desincronizar posiciones ni tiempo.
-- **Las fases:**
-  1. La pantalla se rompe en píxeles y sale un **«¡PARÓN!»** gigante con corneta.
-  2. Una **tragaperras** elige el minijuego, con clics que van frenando y un destello al pararse.
-  3. **2 segundos** con el dibujo y las teclas.
-  4. El minijuego, de **10 a 20 s**.
-  5. **Podio** de los 3 primeros bailando.
-  6. **Cuenta atrás 3-2-1** y vuelve la partida.
-- **Recompensas:**
-  - El podio cobra lonchas y XP.
-  - **El ganador elige una ventaja** para lo que queda de partida: +10% de velocidad, escudo de un golpe o recarga un 20% más rápida.
-  - **Rachas:** ganar minijuegos seguidos sube el multiplicador de lonchas (x1.2, x1.5, x2) y te salen llamas en el nombre. Perder la racha no quita nada.
-- **Reacciones:** durante el minijuego y el podio cualquiera puede lanzar 🔥😂😱👏🍖 con las teclas **1-5**; suben flotando en la pantalla de todos.
-- **Configuración:** el anfitrión puede activarlo o quitarlo en la sala. En offline juegan los bots.
-- **Sala de minijuegos:** todos los minijuegos se pueden jugar sueltos desde el menú, en **MINIJUEGOS**.
+- **Cuántos:** 2 o 3 por partida según la duración (uno cada 45-60 s más o menos). El anfitrión elige **POCOS / NORMAL / MUCHOS** (o ninguno) en la sala; contra bots, en **Opciones → Parones**.
+- **Sin repetir:** los minijuegos salen de una **bolsa barajada**: en una partida no se repite ninguno y la bolsa se acuerda de los últimos de partidas anteriores, para que salgan todos.
+- **Parón Doble:** a veces tocan dos minijuegos seguidos, con transiciones rápidas.
+- **La partida se congela para todos a la vez:** nadie se mueve ni recibe golpes; se paran el reloj, las mechas, las ruletas y los objetos. Online lo decide el servidor, así que todos entran y salen a la vez.
+- **Fases de un Parón:** «¡PARÓN!» gigante → tragaperras que elige el minijuego → **2 s** de recordatorio con el dibujo y los controles → minijuego (10-20 s) → podio → cuenta atrás **3-2-1**.
+- **Recompensas:** el podio cobra lonchas y XP; **el ganador elige una ventaja** (+10% de velocidad, escudo de un golpe o recarga un 20% más rápida); las **rachas** suben el multiplicador (x1.2, x1.5, x2).
+- **Reacciones:** 🔥😂😱👏🍖 con las teclas **1-5** o con los botones del borde derecho en el móvil.
+- **Sala de minijuegos:** todos se pueden jugar sueltos desde **MINIJUEGOS**.
+
+### Evento Ruleta (una vez por partida como mucho)
+
+- Todo se congela. Solo hay **tres botones enormes**: **ROJO 1:1**, **NEGRO 1:1** y **VERDE (0 / 00) 17:1**. Se eligen con el ratón, el dedo, las teclas **1-3** o el mando.
+- Cantidad con **10 / 50 / 100 / TODO** y **− / +**, en grande. Una sola apuesta por ronda: el botón elegido se queda marcado y enseña lo que puedes ganar.
+- **10 s** con barra de tiempo; si no eliges nada, no apuestas.
+- La rueda, la bola y el croupier, en una mesa limpia. **El número lo saca el servidor** (`crypto.getRandomValues`) y el saldo lo cambia el servidor: desde el navegador no se puede trucar.
+- Resultado 3 s y vuelta automática con 3-2-1.
+
+### Evento Carrera de caballos
+
+- Al salir, **eliges tu caballo ganador** (8 s). Cuotas de 2x a 12x.
+- Durante la carrera, machacando ESPACIO (o tocando la pantalla) **animas a tu caballo**. Si gana, cobras lonchas según la cuota.
 
 ### Los 8 minijuegos
 
-Todos se juegan con ← →, ESPACIO y E.
+Todos se juegan con ← →, ESPACIO y E, o tocando la pantalla.
 
-1. **Ruleta americana**
-   - 38 casillas: 1-36 rojos y negros con la distribución real, más el 0 y el 00 en verde.
-   - Cada uno empieza con 100 fichas. ← → eliges la apuesta, ESPACIO pone una ficha y E la quita.
-   - Apuestas y pagos:
-     - **rojo**, **negro**, par/impar y 1-18/19-36: 1 a 1;
-     - **verde (0 o 00)**: 17 a 1;
-     - **tu número de la suerte**: 35 a 1.
-   - El servidor saca el número con `crypto.getRandomValues` cuando se cierran las apuestas. La rueda (con su bola rebotando) para justo en ese número: nada de animaciones falsas de «casi».
-   - Croupier con bocadillos e historial de los últimos 10 números.
-   - Gana quien acaba con más fichas. Lo que ganas apostando también se paga en lonchas.
-2. **Carrera de caballos**
-   - 6 caballos: Pata Negra, Ibérico Veloz, Serrano Turbo, Bellota Express, Jamoncito y Loncha Loca.
-   - Cuotas de 2x a 12x, calculadas simulando la carrera 600 veces.
-   - **En el Parón eliges tu caballo ganador** (8 s).
-   - La carrera dura unos 10 s, con adelantamientos y comentarista. Si está ajustada, hay **foto finish** con zoom.
-   - Mientras corre, machacando ESPACIO **animas a tu caballo** y le das un empujoncito, así que no es solo suerte.
-   - Si gana tu caballo, cobras lonchas según la cuota.
-3. **Corta el Jamón**
-   - El cuchillo va y viene. Pulsa cuando pase por la marca para sacar la loncha más fina: PERFECTO, GENIAL, BIEN o GORDA.
-   - 5 cortes, cada vez más rápidos. Gana quien sume más precisión.
-4. **Torre de Lonchas**
-   - La loncha va de lado a lado y cae al pulsar; lo que sobresale se corta y se cae.
-   - La cámara sigue a la torre y la música se acelera.
-   - Gana la torre más alta en 20 s.
-5. **Tira y Afloja**
-   - Azules contra rojos (o mitad y mitad).
-   - Hay que pulsar **al ritmo** del indicador: machacar a lo loco no sirve.
-   - Gana todo el equipo.
-6. **Trilero del Jamón**
-   - 3, luego 4 y luego 5 cubiletes; uno esconde la loncha dorada.
-   - La mezcla es justa: cada cambio se ve tal cual ocurre y se puede seguir con la vista.
-7. **Reflejos Ibéricos**
-   - Espera con tensión y, cuando sale el jamón, ¡pulsa!
-   - Si te adelantas, esa ronda quedas fuera.
-   - Se muestran los milisegundos de cada uno y el más rápido sale en grande.
-8. **Ritmo Jamonero**
-   - Flechas que caen al ritmo de una canción chiptune generada por código. Combos con números grandes.
-   - 15 s; gana quien haga más puntos.
+1. **Corta el Jamón:** pulsa cuando el cuchillo pase por la marca. 5 cortes, cada vez más rápidos.
+2. **Torre de Lonchas:** suelta la loncha; lo que sobresale se cae. Gana la torre más alta.
+3. **Tira y Afloja:** azules contra rojos, pulsando **al ritmo** del indicador.
+4. **Trilero del Jamón:** sigue el cubilete de la loncha dorada (3, 4 y 5 cubiletes, mezcla justa).
+5. **Reflejos Ibéricos:** cuando sale el jamón, ¡pulsa! Si te adelantas, fuera.
+6. **Ritmo Jamonero:** flechas al ritmo de una canción chiptune.
+7. **Atrapa Lonchas:** mueve la cesta y atrapa lonchas; las doradas valen más y las bombas restan.
+8. **Cuenta Jamones:** se ven un momento muchos jamones y lonchas; ¿cuántos jamones había?
 
 Cada minijuego es un módulo de `shared/minigames/` con la misma interfaz (`input`, `tick`, `state`, `results`, `bot`), así que añadir otro es fácil. Lo ejecutan igual el servidor (online) y el navegador (offline).
 
 ## Modos de juego
 
-Contra bots: **JUGAR CON BOTS → ELIGE MODO** (cuatro tarjetas animadas) → tutorial rápido de 4 viñetas → mapa → ruleta de bando → ¡a jugar! Los bots juegan los cuatro modos.
+Contra bots: **JUGAR → ELIGE MODO** (cuatro tarjetas animadas) → tutorial rápido de 4 viñetas → mapa → ruleta de bando con **2 s de recordatorio** (objetivo y controles) → ¡a jugar! Los bots juegan los cuatro modos.
+
+La **primera vez** que pulsas JUGAR sale un **tutorial jugable de 30 s** (moverse, golpear y sprint) adaptado a teclado, mando o pantalla táctil; se puede saltar y repetir desde **CÓMO JUGAR**, que además resume cada modo en una tarjeta con dibujo, 3 frases y tus controles.
 
 ### 1. Pilla Jamón (el clásico)
 
@@ -201,7 +179,7 @@ Los **azules** pillan a jamonazos; los **rojos** huyen y se rescatan entre ellos
 ### 4. Escondite Jamonero (prop hunt)
 
 - **30 segundos para esconderse:** los buscadores no ven nada y no se pueden mover, y hay una cuenta atrás grande.
-- Los escondidos se **transforman en objetos del mapa** con **E**: papelera, farola, maceta, caja, silla, barril, banco o cubo. Si estás junto a un objeto, copias ese mismo (y su giro); si no, cambias al siguiente.
+- Los escondidos se **transforman en objetos del mapa** con **E**: papelera, farola, maceta, caja, silla, barril, banco o cubo (y en **La Casa**, en sofá, lámpara, nevera, lavadora, cama, armario, tele, bici, macetas y cajas). Si estás junto a un objeto, copias ese mismo (y su giro); si no, cambias al siguiente.
   - **R** gira el objeto.
   - **SHIFT** te ancla: no te mueves nada. Disfrazado y quieto, eres igual que un objeto de verdad, sin nombre, sin vida y sin indicador para el otro equipo.
 - Moverse disfrazado hace **temblar el objeto y levanta polvo**.
@@ -248,7 +226,7 @@ Los **azules** pillan a jamonazos; los **rojos** huyen y se rescatan entre ellos
 1. **Elige mapa** (contra bots) o entra en una **sala online**.
 2. **La ruleta muestra tu bando** (al azar).
    - **Equipo ROJO (escapistas):** chándal oscuro con monograma de doble G y raya verde-roja-verde (parodia «GUCHI», no es el logo real), gorra roja, cadena dorada gorda, pendiente, riñonera y zapatillas blancas. Sobrevive hasta que acabe el tiempo y rescata a tus compañeros enjamonados: tu equipo gana si queda al menos uno libre.
-   - **Equipo AZUL (perseguidores):** pata de jamón y brazalete azul. El atuendo depende de la ciudad: **policías** en París, **militares** en Ceuta, **gente normal de la calle** en Barcelona y uniforme azul en el resto. Pilla a todos los rojos antes de que acabe el tiempo. (En el Escondite, los buscadores van igual.)
+   - **Equipo AZUL (perseguidores):** pata de jamón y brazalete azul. El atuendo depende de la ciudad: **policías** en París, **seguridad del casino** en Las Vegas, **gente normal de la calle** en Barcelona y uniforme azul en el resto. Pilla a todos los rojos antes de que acabe el tiempo. (En el Escondite, los buscadores van igual.)
 3. Los rojos tienen 100 de vida. Cada jamonazo quita 25 y los empuja. Al llegar a 0 quedan eliminados y se convierten en fantasma: pueden volar por el mapa o seguir con la cámara a los que siguen vivos.
 
 Los azules salen 2 segundos después del «¡YA!». Tu personaje lleva una flecha amarilla encima; online, cada jugador lleva su nombre.
@@ -314,7 +292,10 @@ Clásicos:
 Ciudades:
 - **París:** la Torre Eiffel en el Campo de Marte, el Sena con tres puentes, la pirámide del Louvre, tejados de zinc, terrazas de café y **bocas de metro** (Guimard): si entras en una, apareces en la siguiente estación.
 - **Barcelona:** la Sagrada Família (con su grúa), manzanas del Eixample con chaflán, suelo de panot, bancos de trencadís, palmeras, la playa de la Barceloneta y **carriles bici** que te aceleran.
-- **Ceuta:** las Murallas Reales con el foso de San Felipe y sus puentes, el Hércules entre las columnas, casas blancas, el monte Hacho y la playa. Cada cierto tiempo sopla el **levante** y empuja a todos hacia el oeste.
+- **Las Vegas:** de noche, en morados, rosas y dorados. Avenida con luces de neón que parpadean, casinos inventados (JAMÓN PALACE, PATA NEGRA, LUCKY CERDO…), tragaperras y coches como obstáculos, una fuente grande en el centro, un **parking de dos plantas** unidas por ascensores y callejones traseros. Tiene su propia música. Cada ~15 s una tragaperras da el **premio gordo** y suelta monedas.
+
+Solo para el Escondite:
+- **La Casa:** una casa por dentro vista desde arriba: entrada, salón, cocina, comedor, baño, 3 dormitorios, pasillo, escalera, garaje, sótano, desván y lavadero. Las **puertas se abren solas** al acercarte (cerradas tapan la vista). Cada habitación tiene su **interruptor de la luz**: algunas empiezan a oscuras y los buscadores las encienden (o apagan) al pisarlo. Muebles por todas partes para transformarse.
 
 Arenas pequeñas (para Jamón Bomba):
 - **La Plaza:** fuente central y carriles bici.
@@ -324,6 +305,16 @@ Arenas pequeñas (para Jamón Bomba):
 Con más personajes, el mapa crece repitiéndose en espejo: 48×30 tiles hasta 9 personajes y 94×30 hasta 20 (las arenas, 32×20 o 62×20).
 
 ---
+
+## En el móvil y la tablet
+
+- **Controles táctiles** (solo en pantallas táctiles): joystick que aparece donde pones el dedo, a la izquierda, y botones grandes y semitransparentes a la derecha: acción, sprint (mantener), habilidad, girar (Escondite), frases, ruleta y pausa. Los nombres cambian según lo que hace cada botón en ese momento.
+- **Siempre en horizontal:** en vertical sale «GIRA EL MÓVIL». Al pulsar JUGAR se pone en pantalla completa (en iPhone, Safari no lo permite y se juega igual).
+- Respeta el notch y las esquinas redondeadas (*safe areas*). La interfaz se adapta de 360 px a 4K.
+- Menús, tienda, sala y minijuegos se usan con el dedo, con zonas de toque más grandes que el dibujo. Para escribir el nombre o el código de sala se abre el teclado del móvil.
+- **Vibración** al golpear y al pulsar botones (Android).
+- **Calidad automática:** si el móvil no llega a ~42 FPS, menos partículas y sin efectos de ambiente. También se puede fijar en **Opciones → Calidad**.
+- **Instalable** como app (PWA): «Añadir a pantalla de inicio».
 
 ## Opciones
 
@@ -403,8 +394,52 @@ wrangler.toml             configuración del Worker
 
 ### Cómo funciona el online
 
-- **Servidor autoritativo:** cada sala es un Durable Object que ejecuta la misma simulación que el modo offline, a 20 ticks por segundo, y envía a cada jugador un snapshot compacto (unos 8 KB/s con 20 personajes). El servidor decide las transformaciones, los contagios, las mechas, las ruletas y la carrera; los clientes solo lo dibujan.
-- **El cliente solo envía entradas:** dirección, sprint y contadores de pulsaciones, como mucho 15 veces por segundo y solo cuando cambian.
+- **Servidor autoritativo:** cada sala es un Durable Object que ejecuta la misma simulación que el modo offline, a 20 ticks por segundo, y envía a cada jugador un snapshot compacto (unos 18 KB/s por jugador con 17 personajes). El servidor decide las transformaciones, los contagios, las mechas, las ruletas y la carrera; los clientes solo lo dibujan.
+- **El cliente solo envía entradas:** un mensaje **binario de 8 bytes** (dirección, sprint y contadores de pulsaciones), **solo cuando cambia algo** y **como mucho 10 veces por segundo**. El joystick y el stick se redondean a 16 direcciones para no mandar un mensaje por cada milímetro.
+- **Hibernación:** las salas usan la API de hibernación de WebSockets de Cloudflare. En el lobby, sin partida, la sala se puede dormir sin cortar las conexiones, y los pings de mantenimiento (`ping` → `pong`) los contesta Cloudflare sin despertarla (`setWebSocketAutoResponse`). El bucle de 20 ticks solo corre durante la partida y se para si la sala se queda vacía; una sala vacía borra lo que tenía guardado.
+- **Límites por jugador:** como mucho 30 mensajes por segundo (14 de entrada, 4 de ajustes, 2 de cambios de aspecto…), mensajes de más de 4 KB ignorados y expulsión si alguien inunda la sala. Todo se valida en el servidor.
 - **Predicción:** tu personaje se mueve al instante con la misma simulación. Cuando llega el snapshot, se compara con dónde estabas cuando el servidor lo calculó y se corrige suavemente; con 150 ms de ping la corrección media es de unas décimas de píxel.
 - **Interpolación:** los demás se dibujan unos 100 ms en el pasado, entre dos snapshots, y los efectos se reproducen a la vez que se ven.
-- **Reconexión:** si en 4 s no llega nada, la conexión se da por perdida y se reintenta. El servidor guarda tu sitio 15 s y mientras tanto un bot lleva tu personaje.
+- **Reconexión:** si en 5 s no llega nada, la conexión se da por perdida y se reintenta. El servidor guarda tu sitio 15 s y mientras tanto un bot lleva tu personaje.
+
+## Servidor, rendimiento y plan gratuito
+
+### Prueba de carga (50 jugadores)
+
+`npm run loadtest` lanza clientes falsos (Node + `ws`) que se conectan como el juego: se unen a una sala, se ponen listos, juegan partidas de Pilla de 5 min con Parones, mandan entradas binarias solo cuando cambian (cambian de dirección cada 0,3-1,5 s y golpean de vez en cuando) y hacen ping cada 2 s.
+
+```bash
+npm run loadtest                                   # 50 clientes, 3 salas, 5 min contra wrangler dev
+npm run loadtest -- --url https://jamongus.jamon-run.workers.dev --minutes 2
+npm run bench:tick -- 17                           # coste de un tick del servidor (en Node)
+```
+
+Resultado con **50 clientes en 3 salas (17-17-16) durante 5 minutos** (local, `wrangler dev`):
+
+| Medida | Resultado |
+|---|---|
+| Desconexiones y errores | **0** |
+| Ritmo de los ticks del servidor (hora del servidor en cada snapshot) | p50 **50 ms**, p95 52 ms, máx. 86 ms |
+| Ticks perdidos | 10 de ~18 000 (0,06%) |
+| Llegada de snapshots al cliente | p50 50 ms (p95 200 ms: durante los Parones se manda 1 de cada 4, a propósito) |
+| Mensajes que reciben los clientes | ~980/s en total (~20 por jugador y segundo) |
+| Datos que reciben | ~1 MB/s en total (~20 KB/s por jugador) |
+| Entradas que envía cada jugador | **~2 por segundo** (como mucho 10) |
+| Ping | p50 3 ms, p95 6 ms (local) |
+| Coste de un tick (3 pasos + snapshot JSON, medido en Node) | 17 jugadores: p50 0,17 ms, p95 1,0 ms (de 50 ms disponibles) |
+
+Dentro de Cloudflare el reloj no avanza mientras se ejecuta el código, así que el coste del tick se mide en Node con la misma simulación (`npm run bench:tick`); desde fuera se mide el ritmo real al que llegan los ticks.
+
+### Cuánto da el plan gratuito (Workers Free)
+
+Límites diarios que cuentan aquí:
+- **100 000 peticiones** a Durable Objects. Cada mensaje **entrante** por WebSocket cuenta como 1/20 de petición; los salientes (snapshots) no cuentan.
+- **13 000 GB·s** de tiempo de Durable Objects (cada sala despierta cuenta como 128 MB). Las salas hibernadas no cuentan, ni tampoco las respuestas automáticas a los pings.
+
+Con **50 jugadores a la vez en 3 salas**:
+- **Mensajes entrantes** por jugador: ~2 entradas/s (medido) + 0,5 pings/s + algo de lobby y minijuegos ≈ **2,5/s**. Son 125 mensajes/s = 6,25 peticiones/s, así que 100 000 peticiones dan para **~16 000 s ≈ 260 minutos al día (unas 4 horas)**.
+- **Tiempo de las 3 salas despiertas:** 3 × 0,125 GB = 0,375 GB, así que 13 000 GB·s dan para ~34 700 s ≈ 580 minutos. No es lo que limita.
+- **Peor caso** (todos moviendo el stick sin parar, 10 entradas/s): unos **60 minutos al día**.
+
+Con 20 jugadores en una sola sala da para unas 11 horas al día. Las páginas y los archivos del juego no gastan peticiones de Durable Objects. Si se pasa de algún límite, Cloudflare corta hasta las 00:00 UTC (no cobra nada).
+

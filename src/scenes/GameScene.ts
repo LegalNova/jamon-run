@@ -17,7 +17,7 @@ import { GameModel, OfflineModel } from '../game/model';
 import { OnlineModel } from '../net/OnlineModel';
 import { account } from '../net/account';
 import { PICKUP_COLORS, PICKUP_NAMES, PickupView, ProjectileView, PropView } from '../game/views';
-import type { Outfit } from '../gfx/characters';
+import { newCharGeneration, type Outfit } from '../gfx/characters';
 import { Fx } from '../gfx/fx';
 import { TEAM_COLORS } from '../gfx/palette';
 import { GLOBAL_LABELS, PRIZE_LABELS } from '../ui/hype';
@@ -143,6 +143,8 @@ export class GameScene extends Phaser.Scene {
 
   create(): void {
     this.cameras.main.fadeIn(250, 13, 11, 20);
+    // Libera las texturas de personajes de partidas viejas (si no, la memoria crece partida a partida).
+    newCharGeneration(this);
     this.model = this.data_.model ?? this.createOffline();
     account.xpAtStart = account.profile?.xp ?? null;
 

@@ -99,3 +99,28 @@ window.addEventListener('keydown', (e) => {
 // Acceso para depurar desde la consola.
 (window as unknown as { __JAMON__: Phaser.Game; __JAMON_NET__: typeof net }).__JAMON__ = game;
 (window as unknown as { __JAMON_NET__: typeof net }).__JAMON_NET__ = net;
+
+// ------------------------------------------------------------------ errores
+// Un error suelto se apunta y se sigue. Si se repiten (algo se ha roto de verdad),
+// aviso y de vuelta: a la sala si estabas online (la conexión se recupera sola) o al menú.
+let crashes: number[] = [];
+function onCrash(err: unknown): void {
+  console.error('[JAMONGUS]', err);
+  const now = performance.now();
+  crashes = crashes.filter((t) => now - t < 3000);
+  crashes.push(now);
+  if (crashes.length < 3) return;
+  crashes = [];
+  try {
+    input.releaseAll();
+    input.stopTyping();
+    for (const k of ['Minigame', 'Pause', 'Options', 'FirstSteps', 'UI', 'Game', 'Results', 'RoleReveal']) if (game.scene.isActive(k)) game.scene.stop(k);
+    const online = net.status === 'open' || net.status === 'reconnecting';
+    game.scene.start(online ? 'Lobby' : 'Menu');
+    game.events.emit('toast', online ? '¡UPS! ALGO HA FALLADO. VOLVEMOS A LA SALA' : '¡UPS! ALGO HA FALLADO. VOLVEMOS AL MENÚ', 0xff7ab8, 'icon_heart');
+  } catch (e) {
+    console.error('[JAMONGUS] no se pudo recuperar', e);
+  }
+}
+window.addEventListener('error', (e) => onCrash(e.error ?? e.message));
+window.addEventListener('unhandledrejection', (e) => onCrash(e.reason));
