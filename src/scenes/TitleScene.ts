@@ -5,6 +5,7 @@ import { input } from '../core/input';
 import { FONT } from '../gfx/font';
 import { text, UI } from '../ui/widgets';
 import { applyFullscreen, Backdrop, fadeIn, fadeTo } from './common';
+import { mobileFullscreen } from '../core/touchControls';
 
 /** Crea el logo "JAMÓN RUN" con letras sueltas que ondulan. */
 export function createLogo(scene: Phaser.Scene, cx: number, cy: number, scale: number): Phaser.GameObjects.BitmapText[] {
@@ -68,6 +69,7 @@ export class TitleScene extends Phaser.Scene {
     audio.playMusic('menu');
     audio.play('click');
     applyFullscreen();
+    mobileFullscreen();
     // Enlace de invitación (?sala=CODIGO): directo a la sala.
     const params = new URLSearchParams(location.search);
     const sala = params.get('sala');

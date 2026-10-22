@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { IS_TOUCH, touchify } from '../core/touch';
 import { PARON } from '../../shared/balance';
 import type { Equipped } from '../../shared/economy';
 import { MgKey, mgDef, MINIGAMES, ParonNet, ParonPhase, PERKS } from '../../shared/minigames';
@@ -67,6 +68,10 @@ export class MinigameScene extends Phaser.Scene {
 
   /** Toque/clic en la pantalla: lo traduce a teclas del minijuego o elige ventaja. */
   private onTap(p: Phaser.Input.Pointer): void {
+    if (this.reactTap) {
+      this.reactTap = false;
+      return;
+    }
     const net = this.host.net();
     if (!net) return;
     const x = p.x / this.cameras.main.zoom - this.W / 2;
@@ -86,6 +91,8 @@ export class MinigameScene extends Phaser.Scene {
     }
   }
 
+  private reactTap = false;
+
   create(): void {
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => this.onTap(p));
     const { Z, W, H } = viewSize(this);
@@ -104,6 +111,20 @@ export class MinigameScene extends Phaser.Scene {
     this.phaseC = this.add.container(W / 2, H / 2);
     this.bar = this.add.graphics();
     this.header = text(this, W / 2, 10, '', { color: UI.focusLight });
+    // Móvil: botones de reacción (🔥😂😱👏🍖) en el borde derecho, de 48 px como mínimo.
+    if (IS_TOUCH) {
+      const r = Math.max(10, Math.ceil(26 / Z));
+      for (let e = 0; e < 5; e++) {
+        const y = H / 2 - 2 * (r * 2 + 4) + e * (r * 2 + 4);
+        const bg = this.add.circle(W - r - 2, y, r, 0x0d0b14, 0.55).setStrokeStyle(1, 0xffffff, 0.35).setDepth(70);
+        this.add.image(W - r - 2, y, `react_${e}`).setScale(Math.max(1, (r * 1.2) / 12)).setDepth(71);
+        bg.setInteractive().on('pointerdown', () => {
+          this.reactTap = true;
+          this.host.react(e);
+          input.vibrate(10);
+        });
+      }
+    }
     this.confetti = this.add
       .particles(0, 0, 'p_confetti', { lifespan: 1800, speed: { min: 80, max: 230 }, angle: { min: 210, max: 330 }, gravityY: 220, rotate: { min: 0, max: 360 }, tint: [0xe43b44, 0xfee761, 0x63c74d, 0x2f88e8, 0xff7ab8, 0xffffff], emitting: false })
       .setDepth(50);
@@ -196,9 +217,9 @@ export class MinigameScene extends Phaser.Scene {
         this.tweens.add({ targets: ic, scale: 3, duration: 300, ease: 'Back.easeOut' });
         this.tweens.add({ targets: ic, angle: { from: -8, to: 8 }, yoyo: true, repeat: -1, duration: 300 });
         add(text(this, 0, 14, def.name, { scale: 2, color: def.color }));
-        add(text(this, 0, 34, def.howto[0], { color: UI.text }));
-        add(text(this, 0, 46, def.howto[1], { color: UI.text }));
-        add(text(this, 0, 66, `TECLAS: ${def.keys}`, { color: UI.focusLight }));
+        add(text(this, 0, 34, touchify(def.howto[0]), { color: UI.text }));
+        add(text(this, 0, 46, touchify(def.howto[1]), { color: UI.text }));
+        add(text(this, 0, 66, IS_TOUCH ? `CONTROLES: ${touchify(def.keys)}` : `TECLAS: ${def.keys}`, { color: UI.focusLight }));
         audio.play('reveal');
         break;
       }
@@ -267,7 +288,7 @@ export class MinigameScene extends Phaser.Scene {
       const c = this.add.container(0, 92);
       this.phaseC.add(c);
       this.perkCards = c;
-      add(text(this, 0, 76, '← → ELIGE TU VENTAJA · ESPACIO', { color: UI.focusLight }));
+      add(text(this, 0, 76, touchify('← → ELIGE TU VENTAJA · ESPACIO'), { color: UI.focusLight }));
     }
   }
 

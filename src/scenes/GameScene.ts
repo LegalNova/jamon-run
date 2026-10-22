@@ -27,6 +27,7 @@ import type { MgHost } from './MinigameScene';
 import { PERKS } from '../../shared/minigames';
 import { COSMETICS, Equipped } from '../../shared/economy';
 import { GameMap } from '../world/GameMap';
+import { quality } from '../core/quality';
 import { updateDoors } from '../../shared/house';
 import { viewSize } from './common';
 
@@ -325,6 +326,9 @@ export class GameScene extends Phaser.Scene {
     if (m.state === 'ended' && !m.online) dt *= this.endTimer < 1.2 ? 0.3 : 1;
 
     this.map.update(realDt);
+    // Calidad automática: si el móvil no llega, fuera el ambiente y menos partículas.
+    quality.sample(realDt);
+    if (quality.low && this.ambient.emitting) this.ambient.stop();
 
     // Hit-stop: un parón minúsculo al golpear (solo offline; online no se puede parar el servidor).
     if (this.hitStopTimer > 0 && !m.online) {

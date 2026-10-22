@@ -27,6 +27,7 @@ import { ResultsScene } from './scenes/ResultsScene';
 import { RoleRevealScene } from './scenes/RoleRevealScene';
 import { TitleScene } from './scenes/TitleScene';
 import { UIScene } from './scenes/UIScene';
+import { TouchScene } from './core/touchControls';
 
 const game = new Phaser.Game({
   type: Phaser.AUTO,
@@ -45,7 +46,8 @@ const game = new Phaser.Game({
     min: { width: 320, height: 180 },
   },
   audio: { noAudio: true },
-  input: { keyboard: false, gamepad: false },
+  // Varios dedos a la vez en el móvil (joystick + botones).
+  input: { keyboard: false, gamepad: false, activePointers: 4 },
   fps: { target: 60, smoothStep: true },
   disableContextMenu: true,
   banner: false,
@@ -73,6 +75,8 @@ const game = new Phaser.Game({
     MissionsScene,
     MinigameHubScene,
     MinigameScene,
+    // controles táctiles (solo móvil) y avisos encima de todo
+    TouchScene,
     // siempre la última: va encima de todo
     ToastScene,
   ],

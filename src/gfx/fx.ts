@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { BiomeId } from '../world/maps';
 import { FONT, fontText } from './font';
+import { quality } from '../core/quality';
 
 const DUST: Record<BiomeId, number[]> = {
   forest: [0xc8b98a, 0xa89a6e, 0xd8cfa8],
@@ -15,6 +16,13 @@ const DUST: Record<BiomeId, number[]> = {
 
 /** Efectos visuales reutilizables de la partida. */
 export class Fx {
+  /** Ráfaga de partículas (menos con calidad baja o efectos reducidos). */
+  private emit(em: Phaser.GameObjects.Particles.ParticleEmitter, x: number, y: number, n = 1): void {
+    const k = quality.particles;
+    const m = k >= 1 ? n : Math.floor(n * k + Math.random());
+    if (m > 0) em.emitParticleAt(x, y, m);
+  }
+
   private dust: Phaser.GameObjects.Particles.ParticleEmitter;
   private sparks: Phaser.GameObjects.Particles.ParticleEmitter;
   private stars: Phaser.GameObjects.Particles.ParticleEmitter;
@@ -126,18 +134,18 @@ export class Fx {
   }
 
   dustAt(x: number, y: number, n = 1): void {
-    this.dust.emitParticleAt(x, y, n);
+    this.emit(this.dust, x, y, n);
   }
 
   dashBurst(x: number, y: number): void {
-    this.dust.emitParticleAt(x, y, 8);
+    this.emit(this.dust, x, y, 8);
     this.trail.setParticleTint(0x7cc8ff);
-    this.trail.emitParticleAt(x, y - 6, 4);
+    this.emit(this.trail, x, y - 6, 4);
   }
 
   speedTrail(x: number, y: number, color: number): void {
     this.trail.setParticleTint(color);
-    this.trail.emitParticleAt(x + Phaser.Math.Between(-3, 3), y - Phaser.Math.Between(0, 10), 1);
+    this.emit(this.trail, x + Phaser.Math.Between(-3, 3), y - Phaser.Math.Between(0, 10), 1);
   }
 
   hit(x: number, y: number, dirX: number, dirY: number, colors: number[] = [0xffffff, 0xe43b44, 0xfee761]): void {
@@ -146,36 +154,36 @@ export class Fx {
     this.sparks.updateConfig({ angle: { min: ang - 55, max: ang + 55 } });
     for (const c of colors) {
       this.sparks.setParticleTint(c);
-      this.sparks.emitParticleAt(x, y, 4);
+      this.emit(this.sparks, x, y, 4);
     }
-    this.stars.emitParticleAt(x, y, 1);
+    this.emit(this.stars, x, y, 1);
   }
 
   ko(x: number, y: number): void {
     this.sparks.updateConfig({ angle: { min: 0, max: 360 } });
     for (const c of [0xffffff, 0x7cc8ff, 0xfee761, 0xe43b44]) {
       this.sparks.setParticleTint(c);
-      this.sparks.emitParticleAt(x, y, 6);
+      this.emit(this.sparks, x, y, 6);
     }
-    this.smoke.emitParticleAt(x, y, 8);
+    this.emit(this.smoke, x, y, 8);
     this.ring(x, y, 0xffffff, 28);
   }
 
   smokePuff(x: number, y: number, n = 2): void {
-    this.smoke.emitParticleAt(x, y, n);
+    this.emit(this.smoke, x, y, n);
   }
 
   debrisAt(x: number, y: number, colors: number[]): void {
     for (const c of colors) {
       this.debris.setParticleTint(c);
-      this.debris.emitParticleAt(x, y, 4);
+      this.emit(this.debris, x, y, 4);
     }
   }
 
   sparkle(x: number, y: number, color: number): void {
     this.sparks.updateConfig({ angle: { min: 0, max: 360 } });
     this.sparks.setParticleTint(color);
-    this.sparks.emitParticleAt(x, y, 10);
+    this.emit(this.sparks, x, y, 10);
     this.ring(x, y, color, 18);
   }
 
@@ -193,22 +201,22 @@ export class Fx {
 
   /** Chispa de la mecha del jamón bomba. */
   spark(x: number, y: number): void {
-    this.fuse.emitParticleAt(x, y, 2);
+    this.emit(this.fuse, x, y, 2);
   }
 
   confetti(x: number, y: number, n = 30): void {
-    this.confettiE.emitParticleAt(x, y, n);
+    this.emit(this.confettiE, x, y, n);
   }
 
   /** ¡BUM! Confeti, lonchas de jamón y humo. */
   explosion(x: number, y: number): void {
-    this.confettiE.emitParticleAt(x, y, 40);
-    this.slices.emitParticleAt(x, y, 14);
-    this.smoke.emitParticleAt(x, y, 14);
+    this.emit(this.confettiE, x, y, 40);
+    this.emit(this.slices, x, y, 14);
+    this.emit(this.smoke, x, y, 14);
     this.sparks.updateConfig({ angle: { min: 0, max: 360 } });
     for (const c of [0xffffff, 0xfee761, 0xfeae34, 0xe43b44]) {
       this.sparks.setParticleTint(c);
-      this.sparks.emitParticleAt(x, y, 10);
+      this.emit(this.sparks, x, y, 10);
     }
     this.ring(x, y, 0xfeae34, 60);
     this.ring(x, y, 0xffffff, 36);
@@ -216,7 +224,7 @@ export class Fx {
 
   /** Contagio: estallido de partículas verdes. */
   infect(x: number, y: number, n = 16): void {
-    this.virus.emitParticleAt(x, y, n);
+    this.emit(this.virus, x, y, n);
     if (n > 4) this.ring(x, y, 0x9cff5a, 30);
   }
 

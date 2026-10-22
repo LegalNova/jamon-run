@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { Action, ALT_BINDINGS, settings } from '../config/settings';
+import { IS_TOUCH } from './touch';
 
 /** Botones de mando (layout "standard" de la Gamepad API). */
 const PAD = {
@@ -49,9 +50,40 @@ class InputManager {
   private pressed = new Set<string>();
   private padDown = new Set<number>();
 
-  /** Vibración del mando (si hay uno y se permite). */
+  /** Controles táctiles (los rellena el módulo táctil): acciones pulsadas, mantenidas y el joystick. */
+  private vQueued = new Set<Action>();
+  private vPressed = new Set<Action>();
+  private vHeld = new Set<Action>();
+  private vMove = { x: 0, y: 0 };
+
+  /** Un toque en un botón táctil (cuenta como "recién pulsado" en el siguiente frame). */
+  virtualPress(a: Action): void {
+    this.vQueued.add(a);
+    this.anyQueued = true;
+    this.lastDevice = 'touch';
+  }
+
+  virtualHold(a: Action, on: boolean): void {
+    if (on) this.vHeld.add(a);
+    else this.vHeld.delete(a);
+  }
+
+  virtualMove(x: number, y: number): void {
+    this.vMove.x = x;
+    this.vMove.y = y;
+  }
+
+  /** Suelta todo (al perder el foco, al pausar...): nunca se quedan teclas pegadas. */
+  releaseAll(): void {
+    this.down.clear();
+    this.vHeld.clear();
+    this.vMove.x = this.vMove.y = 0;
+  }
+
+  /** Vibración del mando (si hay uno y se permite) o del móvil. */
   rumble(strength: number, ms: number): void {
     if (!settings.rumble) return;
+    if (IS_TOUCH) this.vibrate(ms);
     try {
       for (const p of navigator.getGamepads?.() ?? []) {
         const act = (p as unknown as { vibrationActuator?: { playEffect(t: string, o: object): Promise<unknown> } } | null)?.vibrationActuator;
@@ -69,7 +101,17 @@ class InputManager {
   private typing: ((key: string, code: string) => void) | null = null;
   private anyQueued = false;
   private anyPressed = false;
-  lastDevice: 'keyboard' | 'gamepad' = 'keyboard';
+  lastDevice: 'keyboard' | 'gamepad' | 'touch' = IS_TOUCH ? 'touch' : 'keyboard';
+
+  /** Vibración del móvil (Android; en iPhone no hay y no pasa nada). */
+  vibrate(ms: number | number[]): void {
+    if (!settings.rumble || !IS_TOUCH) return;
+    try {
+      navigator.vibrate?.(ms);
+    } catch {
+      /* sin vibración */
+    }
+  }
   padConnected = false;
 
   attach(game: Phaser.Game): void {
@@ -77,6 +119,8 @@ class InputManager {
       if (PREVENT.has(e.code)) e.preventDefault();
       this.lastDevice = 'keyboard';
       if (this.typing) {
+        // Teclado del móvil (Android): lo procesa el campo de texto nativo (ver openNativeInput).
+        if ((e.target as HTMLElement | null)?.id === 'name-input' && (e.key === 'Unidentified' || e.keyCode === 229)) return;
         e.preventDefault();
         this.typing(e.key, e.code);
         return;
@@ -97,8 +141,9 @@ class InputManager {
     window.addEventListener('keyup', (e) => {
       this.down.delete(e.code);
     });
-    window.addEventListener('blur', () => {
-      this.down.clear();
+    window.addEventListener('blur', () => this.releaseAll());
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) this.releaseAll();
     });
     window.addEventListener('gamepadconnected', () => (this.padConnected = true));
     window.addEventListener('gamepaddisconnected', () => {
@@ -112,6 +157,8 @@ class InputManager {
     this.queued = new Set();
     this.anyPressed = this.anyQueued;
     this.anyQueued = false;
+    this.vPressed = this.vQueued;
+    this.vQueued = new Set();
 
     // Mando
     this.padPrev = this.padDown;
@@ -188,6 +235,7 @@ class InputManager {
   }
 
   isDown(action: Action): boolean {
+    if (this.vHeld.has(action)) return true;
     if (this.codesFor(action).some((c) => this.down.has(c))) return true;
     return PAD_ACTIONS[action].some((b) => this.padDown.has(b));
   }
@@ -198,6 +246,7 @@ class InputManager {
   }
 
   justPressed(action: Action): boolean {
+    if (this.vPressed.has(action)) return true;
     if (this.codesFor(action).some((c) => this.pressed.has(c))) return true;
     return PAD_ACTIONS[action].some((b) => this.padDown.has(b) && !this.padPrev.has(b));
   }
@@ -213,6 +262,10 @@ class InputManager {
     if (x === 0 && y === 0 && (this.padAxes.x || this.padAxes.y)) {
       x = this.padAxes.x;
       y = this.padAxes.y;
+    }
+    if (x === 0 && y === 0 && (this.vMove.x || this.vMove.y)) {
+      x = this.vMove.x;
+      y = this.vMove.y;
     }
     const len = Math.hypot(x, y);
     if (len > 1) {
@@ -232,6 +285,7 @@ class InputManager {
       this.pressed.has('NumpadEnter') ||
       this.pressed.has('Space') ||
       this.pressed.has(settings.bindings.action) ||
+      this.vPressed.has('action') ||
       (this.padDown.has(PAD.A) && !this.padPrev.has(PAD.A)) ||
       (this.padDown.has(PAD.START) && !this.padPrev.has(PAD.START))
     );
@@ -242,6 +296,7 @@ class InputManager {
       this.pressed.has('Escape') ||
       this.pressed.has('Backspace') ||
       this.pressed.has(settings.bindings.pause) ||
+      this.vPressed.has('pause') ||
       (this.padDown.has(PAD.B) && !this.padPrev.has(PAD.B))
     );
   }
@@ -264,13 +319,58 @@ class InputManager {
   }
 
   /** Modo escritura (p. ej. el nombre): las teclas van al callback y no al juego. */
-  startTyping(cb: (key: string, code: string) => void): void {
+  startTyping(cb: (key: string, code: string) => void, initial = ''): void {
     this.typing = cb;
     this.down.clear();
+    if (IS_TOUCH) this.openNativeInput(initial);
   }
 
   stopTyping(): void {
     this.typing = null;
+    this.closeNativeInput();
+  }
+
+  /**
+   * En el móvil no hay teclado físico: abrimos el teclado del sistema con un campo de texto
+   * real y traducimos lo que se escribe a las mismas pulsaciones (letras, borrar, Enter).
+   */
+  private openNativeInput(initial: string): void {
+    const el = document.getElementById('name-input') as HTMLInputElement | null;
+    if (!el) return;
+    let prev = initial;
+    el.value = initial;
+    el.style.display = 'block';
+    el.style.left = '50%';
+    el.style.top = 'max(8px, env(safe-area-inset-top))';
+    el.style.transform = 'translateX(-50%)';
+    el.style.width = '240px';
+    el.oninput = () => {
+      const v = el.value;
+      let i = 0;
+      while (i < prev.length && i < v.length && prev[i] === v[i]) i++;
+      for (let k = prev.length; k > i; k--) this.typing?.('Backspace', 'Backspace');
+      for (const ch of v.slice(i)) this.typing?.(ch, /[a-z]/i.test(ch) ? `Key${ch.toUpperCase()}` : ch === ' ' ? 'Space' : 'Unidentified');
+      prev = v;
+    };
+    el.onkeydown = (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        this.typing?.('', 'Enter');
+      }
+    };
+    // Cerrar el teclado del móvil = terminar de escribir.
+    el.onblur = () => this.typing?.('', 'Enter');
+    el.focus();
+  }
+
+  private closeNativeInput(): void {
+    const el = document.getElementById('name-input') as HTMLInputElement | null;
+    if (!el || el.style.display === 'none') return;
+    el.onblur = null;
+    el.oninput = null;
+    el.onkeydown = null;
+    el.blur();
+    el.style.display = 'none';
   }
 
   isTyping(): boolean {
@@ -280,6 +380,7 @@ class InputManager {
   /** Olvida las pulsaciones de este frame (evita que una pulsación active dos cosas). */
   consume(): void {
     this.pressed.clear();
+    this.vPressed.clear();
     this.anyPressed = false;
     this.navFired.clear();
     this.padPrev = new Set(this.padDown);

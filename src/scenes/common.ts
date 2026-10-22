@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { VIEW_H, VIEW_W } from '../config/balance';
 import { settings } from '../config/settings';
 import { input } from '../core/input';
+import { IS_TOUCH } from '../core/touch';
 import { charKey } from '../gfx/characters';
 
 /** Transición con fundido a negro. */
@@ -45,7 +46,10 @@ function pixelate(scene: Phaser.Scene, from: number, to: number, ms: number): vo
 export function viewSize(scene: Phaser.Scene): { Z: number; W: number; H: number } {
   const w = scene.scale.width;
   const h = scene.scale.height;
-  const Z = Math.max(1, Math.floor(Math.min(w / VIEW_W, h / VIEW_H)));
+  const fit = Math.min(w / VIEW_W, h / VIEW_H);
+  // En el móvil, zoom no entero para aprovechar toda la pantalla (todo se ve más grande);
+  // en el ordenador, entero para que los píxeles queden perfectos (de 360 px a 4K).
+  const Z = IS_TOUCH ? Math.max(1, Math.floor(fit * 8) / 8) : Math.max(1, Math.floor(fit));
   return { Z, W: w / Z, H: h / Z };
 }
 

@@ -159,7 +159,7 @@ export class CharacterScene extends Phaser.Scene {
       else if (key.length === 1 && this.look.name.length < NAME_MAX) this.look.name = cleanName(this.look.name + key);
       audio.play('hover');
       this.nameRow.refresh();
-    });
+    }, this.look.name);
   }
 
   private stopTyping(): void {

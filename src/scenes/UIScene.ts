@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { houseLayout, lightOn } from '../../shared/house';
+import { IS_TOUCH } from '../core/touch';
 import { BALANCE, HYPE, MODES, PHRASES, TILE } from '../config/balance';
 import { keyName, settings } from '../config/settings';
 import { audio } from '../core/audio';
@@ -155,7 +156,7 @@ export class UIScene extends Phaser.Scene {
       const y = VIEW_H - 40;
       panel(this.g, x, y, 28, 28, UI.panelDark);
       this.slotIcons.push(this.add.image(x + 14, y + 14, i === 2 ? 'icon_bolt' : 'icon_dash'));
-      this.slotKeys.push(text(this, x + 14, y + 33, keyName(keys[i]).replace(' IZQ', '').replace(' DER', ''), { color: UI.muted }));
+      this.slotKeys.push(text(this, x + 14, y + 33, IS_TOUCH ? '' : keyName(keys[i]).replace(' IZQ', '').replace(' DER', ''), { color: UI.muted }));
       this.slotLabels.push(text(this, x + 14, VIEW_H - 46, i === 2 ? 'SPRINT' : i === 3 ? 'GIRAR' : '', { color: UI.text }));
       this.slotAbility.push('none');
     }
@@ -175,8 +176,9 @@ export class UIScene extends Phaser.Scene {
     this.mmScale = this.game_.map.miniScale;
     const mw = this.game_.map.grid.w * this.mmScale;
     const mh = this.game_.map.grid.h * this.mmScale;
-    const mx = VIEW_W - mw - 6;
-    const my = VIEW_H - mh - 6;
+    // En el móvil, abajo a la derecha van los botones: el minimapa sube arriba.
+    const mx = IS_TOUCH ? VIEW_W - mw - 6 - Math.ceil(76 / Z) : VIEW_W - mw - 6;
+    const my = IS_TOUCH ? 6 : VIEW_H - mh - 6;
     panel(this.g, mx - 2, my - 2, mw + 4, mh + 4, UI.panelDark);
     this.add.image(mx, my, 'mini_' + this.game_.map.id).setOrigin(0).setAlpha(0.9);
     this.mm = this.add.graphics();
@@ -190,7 +192,7 @@ export class UIScene extends Phaser.Scene {
     }).setVisible(false);
     this.hiddenHint = text(this, VIEW_W / 2, VIEW_H - 12, 'ESCONDIDO EN EL ARBUSTO', { color: 0x63c74d }).setVisible(false);
     this.trapHint = text(this, VIEW_W / 2, VIEW_H / 2 + 34, '', { color: 0xfee761 }).setVisible(false);
-    text(this, VIEW_W / 2, VIEW_H - 24, `${keyName(settings.bindings.talk)}: FRASES`, { color: UI.muted }).setAlpha(0.7);
+    if (!IS_TOUCH) text(this, VIEW_W / 2, VIEW_H - 24, `${keyName(settings.bindings.talk)}: FRASES`, { color: UI.muted }).setAlpha(0.7);
     this.flash = this.add.rectangle(0, 0, VIEW_W, VIEW_H, 0xe43b44, 0).setOrigin(0);
     // Fase de esconderse: los buscadores no ven nada.
     this.blind = this.add.rectangle(0, 0, VIEW_W, VIEW_H, 0x05040a, 1).setOrigin(0).setDepth(90).setVisible(false);
@@ -327,7 +329,8 @@ export class UIScene extends Phaser.Scene {
   }
 
   private addFeed(s: string, color: number): void {
-    const t = this.add.bitmapText(this.W - 6, 0, FONT, fontText(s)).setOrigin(1, 0).setTint(color);
+    // En el móvil, centrado (a la derecha están el minimapa y los botones).
+    const t = IS_TOUCH ? this.add.bitmapText(this.W / 2, 0, FONT, fontText(s)).setOrigin(0.5, 0).setTint(color) : this.add.bitmapText(this.W - 6, 0, FONT, fontText(s)).setOrigin(1, 0).setTint(color);
     this.feed.unshift({ t, life: 3.2 });
     while (this.feed.length > 6) this.feed.pop()!.t.destroy();
   }

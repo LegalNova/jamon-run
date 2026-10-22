@@ -2,6 +2,26 @@ import Phaser from 'phaser';
 import { audio } from '../core/audio';
 import { input } from '../core/input';
 import { FONT, fontText } from '../gfx/font';
+import { IS_TOUCH } from '../core/touch';
+
+/** Tamaño mínimo de toque en el móvil (px de pantalla). */
+export const TOUCH_TARGET = 48;
+
+/**
+ * Zona de toque de un botón: en el móvil, más grande que el dibujo (hasta ~48 px reales)
+ * para poder usar los menús con el dedo. En el ordenador, la del dibujo.
+ */
+export function touchHit(o: Phaser.GameObjects.Container, w: number, h: number, maxPad = 7): void {
+  if (!IS_TOUCH) {
+    o.setInteractive({ useHandCursor: true });
+    return;
+  }
+  const z = Math.max(1, Math.min(o.scene.scale.width / 480, o.scene.scale.height / 270));
+  const need = TOUCH_TARGET / z;
+  const py = Math.min(maxPad, Math.max(0, (need - h) / 2));
+  const px = Math.min(maxPad, Math.max(2, (need - w) / 2));
+  o.setInteractive(new Phaser.Geom.Rectangle(-px, -py, w + px * 2, h + py * 2), Phaser.Geom.Rectangle.Contains);
+}
 
 export const UI = {
   panel: 0x2a2140,
@@ -79,7 +99,7 @@ export class Button extends Phaser.GameObjects.Container implements Focusable {
     this.label = scene.add.bitmapText(0, 0, FONT, fontText(labelText)).setOrigin(0.5, 0.5);
     this.add([this.g, this.label]);
     this.setSize(bw, bh);
-    this.setInteractive({ useHandCursor: true });
+    touchHit(this, bw, bh);
     this.on('pointerover', () => {
       if (!this.enabled) return;
       this.menu?.focusItem(this);
@@ -197,7 +217,7 @@ export class OptionRow extends Phaser.GameObjects.Container implements Focusable
     this.right = scene.add.bitmapText(bw / 2 - 8, 0, FONT, '→').setOrigin(0.5, 0.5);
     this.add([this.g, this.label, this.value, this.left, this.right]);
     this.setSize(bw, h);
-    this.setInteractive({ useHandCursor: true });
+    touchHit(this, bw, h, 4);
     this.on('pointerover', () => this.menu?.focusItem(this));
     this.on('pointerup', (p: Phaser.Input.Pointer) => {
       const lx = p.worldX - this.x;

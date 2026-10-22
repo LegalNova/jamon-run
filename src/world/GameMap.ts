@@ -7,6 +7,7 @@ import { FONT, fontText } from '../gfx/font';
 import { doorHorizontal, switchSpot } from '../gfx/houseTiles';
 import { CASINO_NAMES, casinoColor } from '../gfx/vegasTiles';
 import { houseLayout, lightOn } from '../../shared/house';
+import { quality } from '../core/quality';
 import { Grid, Terrain } from './grid';
 import { BiomeId } from './maps';
 
@@ -235,7 +236,7 @@ export class GameMap {
   }
 
   update(dt: number): void {
-    for (const n of this.neons) {
+    for (const n of quality.low ? [] : this.neons) {
       if (n.off > 0) {
         n.off -= dt;
         if (n.off <= 0) for (const o of n.objs) o.setAlpha(1);

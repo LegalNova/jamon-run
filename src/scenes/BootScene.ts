@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { startTouchControls } from '../core/touchControls';
 import { buildCharacterTextures } from '../gfx/characters';
 import { buildFonts } from '../gfx/font';
 import { buildModeArt } from '../gfx/modeArt';
@@ -22,6 +23,7 @@ export class BootScene extends Phaser.Scene {
     this.buildFullscreenIcon();
     document.getElementById('loading')?.remove();
     this.scene.launch('Toast');
+    startTouchControls(this);
     this.scene.start('Title');
   }
 

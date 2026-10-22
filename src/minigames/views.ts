@@ -3,6 +3,7 @@
  * y dan respuesta inmediata a tus teclas (sonido, texto, temblor).
  */
 import Phaser from 'phaser';
+import { touchify } from '../core/touch';
 import { MG } from '../../shared/balance';
 import type { MgId, MgKey } from '../../shared/minigames';
 import { BEAT } from '../../shared/minigames/ritmo';
@@ -55,7 +56,7 @@ export abstract class MgView {
     return o;
   }
   protected txt(x: number, y: number, s: string, color: number = UI.text, scale = 1, origin: [number, number] = [0.5, 0.5]): Phaser.GameObjects.BitmapText {
-    return this.add(text(this.s, x, y, s, { color, scale, origin }));
+    return this.add(text(this.s, x, y, touchify(s), { color, scale, origin }));
   }
   protected me<T>(st: St): T | undefined {
     return (st.ps as Ps<T> | undefined)?.[this.h.myId];
@@ -430,7 +431,7 @@ class CaballosView extends MgView {
     }
     if (t < C.pick) {
       this.comment.setText(fontText(`ELIGE TU CABALLO GANADOR · ${Math.ceil(C.pick - t)}`));
-      this.prompt.setText(fontText(me?.l ? `¡TU CABALLO: ${C.horses[me.s]}! PAGA X${odds[me.s]}` : '← → ELEGIR · ESPACIO CONFIRMAR'));
+      this.prompt.setText(fontText(me?.l ? `¡TU CABALLO: ${C.horses[me.s]}! PAGA X${odds[me.s]}` : touchify('← → ELEGIR · ESPACIO CONFIRMAR')));
       return;
     }
     for (const s of this.horses) if (s.anims.isPaused && w < 0) s.anims.resume();
@@ -444,7 +445,7 @@ class CaballosView extends MgView {
       if (lead !== this.leader) audio.play('gallop');
       this.leader = lead;
       this.comment.setText(fontText(c.replace('{H}', C.horses[lead])));
-      this.prompt.setText(fontText(me?.l ? '¡MACHACA ESPACIO PARA ANIMAR A TU CABALLO!' : 'NO ELEGISTE CABALLO... ¡A MIRAR!')).setTint(Math.floor(t * 8) % 2 ? 0xffffff : 0xfee761);
+      this.prompt.setText(fontText(me?.l ? touchify('¡MACHACA ESPACIO PARA ANIMAR A TU CABALLO!') : 'NO ELEGISTE CABALLO... ¡A MIRAR!')).setTint(Math.floor(t * 8) % 2 ? 0xffffff : 0xfee761);
     } else if (!this.done) {
       this.done = true;
       for (const s of this.horses) s.anims.pause();
@@ -787,7 +788,7 @@ class TrileroView extends MgView {
     if (t >= pick && t < pick + T.pick && me) {
       this.cursor.fillStyle(me.l ? 0x63c74d : 0xfee761, 1).fillTriangle(sx(me.s) - 6, 52, sx(me.s) + 6, 52, sx(me.s), 44);
     }
-    const left = t < shuffle ? '¡MIRA DÓNDE ESTÁ LA LONCHA!' : t < pick ? '¡SIGUE EL CUBILETE!' : t < pick + T.pick ? (me?.l ? '¡ELEGIDO!' : `← → ELIGE · ESPACIO  ${Math.ceil(pick + T.pick - t)}`) : '¿ACERTASTE?';
+    const left = t < shuffle ? '¡MIRA DÓNDE ESTÁ LA LONCHA!' : t < pick ? '¡SIGUE EL CUBILETE!' : t < pick + T.pick ? (me?.l ? '¡ELEGIDO!' : `${touchify('← → ELIGE · ESPACIO')}  ${Math.ceil(pick + T.pick - t)}`) : '¿ACERTASTE?';
     this.info.setText(fontText(`RONDA ${r + 1}/3 · ${left}`));
     const ps = st.ps as Ps<{ sc: number }>;
     const rows = Object.entries(ps)

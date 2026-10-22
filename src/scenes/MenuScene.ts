@@ -5,6 +5,7 @@ import { Button, Menu, text, UI } from '../ui/widgets';
 import { account } from '../net/account';
 import { today } from '../../shared/economy';
 import { addFullscreenButton, Backdrop, fadeIn, fadeTo } from './common';
+import { mobileFullscreen } from '../core/touchControls';
 import { createLogo, waveLogo } from './TitleScene';
 
 export class MenuScene extends Phaser.Scene {
@@ -28,8 +29,8 @@ export class MenuScene extends Phaser.Scene {
       .setDepth(-5);
     this.menu = new Menu();
     const items: [string, () => void, number?][] = [
-      ['JUGAR ONLINE', () => fadeTo(this, 'Online'), UI.green],
-      ['JUGAR CON BOTS', () => fadeTo(this, 'ModeSelect'), UI.green],
+      ['JUGAR ONLINE', () => (mobileFullscreen(), fadeTo(this, 'Online')), UI.green],
+      ['JUGAR CON BOTS', () => (mobileFullscreen(), fadeTo(this, 'ModeSelect')), UI.green],
       ['MINIJUEGOS', () => fadeTo(this, 'MinigameHub')],
       ['TIENDA', () => fadeTo(this, 'Shop')],
       ['MISIONES', () => fadeTo(this, 'Missions')],
