@@ -414,19 +414,20 @@ npm run loadtest -- --url https://jamongus.jamon-run.workers.dev --minutes 2
 npm run bench:tick -- 17                           # coste de un tick del servidor (en Node)
 ```
 
-Resultado con **50 clientes en 3 salas (17-17-16) durante 5 minutos** (local, `wrangler dev`):
+Resultado con **50 clientes en 3 salas (17-17-16) durante 5 minutos**, en producción (`jamongus.jamon-run.workers.dev`, desde España) y en local (`wrangler dev`):
 
-| Medida | Resultado |
-|---|---|
-| Desconexiones y errores | **0** |
-| Ritmo de los ticks del servidor (hora del servidor en cada snapshot) | p50 **50 ms**, p95 52 ms, máx. 86 ms |
-| Ticks perdidos | 10 de ~18 000 (0,06%) |
-| Llegada de snapshots al cliente | p50 50 ms (p95 200 ms: durante los Parones se manda 1 de cada 4, a propósito) |
-| Mensajes que reciben los clientes | ~980/s en total (~20 por jugador y segundo) |
-| Datos que reciben | ~1 MB/s en total (~20 KB/s por jugador) |
-| Entradas que envía cada jugador | **~2 por segundo** (como mucho 10) |
-| Ping | p50 3 ms, p95 6 ms (local) |
-| Coste de un tick (3 pasos + snapshot JSON, medido en Node) | 17 jugadores: p50 0,17 ms, p95 1,0 ms (de 50 ms disponibles) |
+| Medida | Producción | Local |
+|---|---|---|
+| Partidas jugadas a la vez | 3 de 3 | 3 de 3 |
+| Desconexiones y errores | **0** | **0** |
+| Ritmo de los ticks del servidor (hora del servidor en cada snapshot) | p50 **50 ms**, p95 50 ms, máx. 50 ms | p50 50 ms, p95 52 ms, máx. 86 ms |
+| Ticks perdidos | 13 de ~18 000 (0,07%) | 10 de ~18 000 |
+| Llegada de snapshots al cliente | p50 50 ms, máx. 522 ms (p95 201 ms: en los Parones se manda 1 de cada 4, a propósito) | p50 50 ms |
+| Mensajes que reciben los clientes | ~930/s en total (~19 por jugador y segundo) | ~980/s |
+| Datos que reciben | ~970 KB/s en total (~19 KB/s por jugador) | ~1 MB/s |
+| Entradas que envía cada jugador | **~2 por segundo** (como mucho 10) | ~2 por segundo |
+| Ping | p50 36 ms, p95 113 ms | p50 3 ms |
+| Coste de un tick (3 pasos + snapshot JSON, medido en Node) | — | 17 jugadores: p50 0,17 ms, p95 1,0 ms (de 50 ms disponibles) |
 
 Dentro de Cloudflare el reloj no avanza mientras se ejecuta el código, así que el coste del tick se mide en Node con la misma simulación (`npm run bench:tick`); desde fuera se mide el ritmo real al que llegan los ticks.
 

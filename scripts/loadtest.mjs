@@ -29,6 +29,8 @@ const stats = {
   snapshots: 0,
   disconnects: 0,
   closeCodes: {},
+  handshakeRetries: 0,
+  serverErrors: {},
   reconnects: 0,
   errors: 0,
   rtts: [],
@@ -70,10 +72,13 @@ class FakeClient {
   }
 
   connect() {
-    const ws = new WebSocket(`${base}/ws/${this.code}`);
+    // Si el saludo inicial (handshake) no termina en 8 s, se reintenta.
+    const ws = new WebSocket(`${base}/ws/${this.code}`, { handshakeTimeout: 8000 });
     this.ws = ws;
+    this.opened = false;
     ws.binaryType = 'arraybuffer';
     ws.on('open', () => {
+      this.opened = true;
       this.send({ t: 'hello', pid: this.pid, look: { name: `CARGA${this.i}` }, acct: '' });
     });
     ws.on('message', (data, isBinary) => {
@@ -97,6 +102,11 @@ class FakeClient {
     ws.on('close', (code) => {
       this.inMatch = false;
       if (this.closedOnPurpose) return;
+      if (!this.opened) {
+        stats.handshakeRetries++;
+        setTimeout(() => this.connect(), 500);
+        return;
+      }
       stats.disconnects++;
       stats.closeCodes[code] = (stats.closeCodes[code] ?? 0) + 1;
       if (stats.disconnects <= 3) console.log(`  desconexión: cliente ${this.i}, código ${code}, a los ${((Date.now() - stats.started) / 1000).toFixed(1)} s`);
@@ -118,20 +128,30 @@ class FakeClient {
     const room = rooms.get(this.code);
     if (m.t === 'lobby') {
       room.players = m.players.filter((p) => p.connected).length;
-      if (this.host && m.phase === 'lobby' && !this.configured) {
+      this.lastLobbyHasMe = m.players.some((p) => p.id === m.you);
+      room.seen = { at: ((Date.now() - stats.started) / 1000).toFixed(1), fase: m.phase, jugadores: m.players.length, conectados: m.players.filter((p) => p.connected).length, listos: m.players.filter((p) => p.ready).length, anfitrion: m.players.find((p) => p.host)?.name, noListos: m.players.filter((p) => !p.ready && !p.host).map((p) => p.name) };
+      if (this.host) room.lobby = `${m.phase} ${m.players.filter((p) => p.ready).length}/${m.players.length} listos, anfitrión ${m.players.find((p) => p.host)?.name}`;
+      const me = m.players.find((p) => p.id === m.you);
+      if (me?.host && m.phase === 'lobby' && !this.configured) {
         this.configured = true;
         this.send({ t: 'settings', s: { mode: 'pilla', duration: 300, botFill: 0, paron: PARON, mapId: 'barcelona' } });
       }
-      const me = m.players.find((p) => p.id === m.you);
       // Los demás se ponen "listos"; el anfitrión arranca cuando lo están todos.
-      if (!this.host && m.phase === 'lobby' && me && !me.ready && Date.now() - (this.readyAt ?? 0) > 500) {
+      // El anfitrión lo decide el servidor (el primero que llega, que en internet no siempre es el 0).
+      const iAmHost = !!me?.host;
+      if (!iAmHost && m.phase === 'lobby' && me && !me.ready && Date.now() - (this.readyAt ?? 0) > 500) {
         this.readyAt = Date.now();
         this.send({ t: 'ready', v: true });
       }
-      if (this.host && this.wantStart && m.phase === 'lobby' && m.players.filter((p) => p.connected && !p.host).every((p) => p.ready) && Date.now() - (this.startAt ?? 0) > 1500) {
+      const expected = Math.floor(CLIENTS / ROOMS) + (codes.indexOf(this.code) < CLIENTS % ROOMS ? 1 : 0);
+      if (iAmHost && m.phase === 'lobby' && m.players.filter((p) => p.connected).length >= expected && m.players.filter((p) => p.connected && !p.host).every((p) => p.ready) && Date.now() - (this.startAt ?? 0) > 1500) {
         this.startAt = Date.now();
         this.send({ t: 'start' });
       }
+    } else if (m.t === 'welcome') {
+      this.welcomed = true;
+    } else if (m.t === 'error') {
+      stats.serverErrors[m.msg] = (stats.serverErrors[m.msg] ?? 0) + 1;
     } else if (m.t === 'start') {
       this.inMatch = true;
       if (this.host) room.matches++;
@@ -140,6 +160,7 @@ class FakeClient {
       // La sala vuelve al lobby: el anfitrión arranca otra en cuanto todos están listos.
     } else if (m.t === 's') {
       stats.snapshots++;
+      this.lastSnap = Date.now();
       if (this.host) {
         const now = Date.now();
         const s = m.s;
@@ -206,10 +227,6 @@ async function main() {
     await sleep(40);
   }
   await sleep(3000);
-  for (const c of clients.filter((c) => c.host)) {
-    c.wantStart = true;
-    c.send({ t: 'start' });
-  }
 
   const end = Date.now() + MINUTES * 60_000;
   let sec = 0;
@@ -239,6 +256,11 @@ async function main() {
   while (Date.now() < end) await sleep(1000);
   clearInterval(inputTimer);
   clearInterval(pingTimer);
+  const lobbyAntes = [...rooms.values()].map((r) => r.seen);
+  const porSalaAntes = codes.map((code) => {
+    const cs = clients.filter((c) => c.code === code);
+    return `${code}: ${cs.filter((c) => c.ws.readyState === WebSocket.OPEN).length} abiertos, ${cs.filter((c) => Date.now() - (c.lastSnap ?? 0) < 3000).length} reciben la partida`;
+  });
   for (const c of clients) c.close();
   await sleep(500);
 
@@ -252,6 +274,9 @@ async function main() {
     salas: ROOMS,
     minutos: MINUTES,
     partidas: [...rooms.values()].reduce((a, r) => a + r.matches, 0),
+    sinBienvenida: clients.filter((c) => !c.welcomed).map((c) => c.i),
+    porSala: porSalaAntes,
+    ultimoLobby: lobbyAntes,
     recibidosPorSeg: Math.round(avg((r) => r.recv)),
     kbPorSeg: Math.round(avg((r) => r.kb)),
     enviadosPorSeg: Math.round(avg((r) => r.sent)),
@@ -260,8 +285,10 @@ async function main() {
     llegadaSnapshotsMs: { p50: pct(allArrival, 0.5), p95: pct(allArrival, 0.95), max: pct(allArrival, 1) },
     ticksPerdidos: [...rooms.values()].reduce((a, r) => a + r.missed, 0),
     pingMs: { p50: pct(stats.rtts, 0.5), p95: pct(stats.rtts, 0.95) },
+    reintentosDeConexion: stats.handshakeRetries,
     desconexiones: stats.disconnects,
     codigosDeCierre: stats.closeCodes,
+    avisosDelServidor: stats.serverErrors,
     errores: stats.errors,
   };
   console.log('\nRESULTADO');
